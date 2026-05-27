@@ -1,0 +1,161 @@
+/* ============================================================
+   ReleaseRadar — print overrides
+   ============================================================ */
+
+/* Force a wide landscape page so the full 3-week timeline fits */
+@page {
+  size: 1800px 1180px;
+  margin: 0;
+}
+
+html, body, #root { height: auto !important; min-height: 0 !important; }
+
+body {
+  background: #07080a;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+  color-adjust: exact;
+}
+
+/* The print app: a flow of pages, no scroll */
+.rr-print {
+  display: flex;
+  flex-direction: column;
+}
+
+.rr-print-page {
+  width: 1800px;
+  min-height: 1180px;
+  background: #07080a;
+  position: relative;
+  overflow: hidden;
+  break-after: page;
+  page-break-after: always;
+  break-inside: avoid;
+  display: flex;
+  flex-direction: column;
+}
+.rr-print-page:last-child { break-after: auto; page-break-after: auto; }
+
+/* On-screen separators between pages so the file is browsable too */
+.rr-print-page + .rr-print-page {
+  border-top: 6px solid rgba(124,140,255,.3);
+  margin-top: 24px;
+}
+
+/* PAGE 1 — main view */
+.rr-print-page .rr-shell {
+  height: 1180px;
+  min-width: 0;
+  grid-template-columns: 240px 1fr;
+}
+.rr-print-page .rr-main { height: 100%; overflow: visible; }
+.rr-print-page .rr-header { position: static; }
+.rr-print-page .rr-timeline { overflow: visible; }
+.rr-print-page .rr-tl-scroll { overflow: visible; }
+.rr-print-page .rr-tl-grid {
+  /* Let the grid take its natural width */
+}
+.rr-print-page .rr-tl-corner,
+.rr-print-page .rr-days,
+.rr-print-page .rr-tl-bodylabels {
+  position: static;
+}
+.rr-print-page .rr-sidebar { overflow: visible; }
+
+/* PAGE 2+ — detail headers */
+.rr-print-header {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  padding: 28px 44px 18px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  background: linear-gradient(180deg, #0d0f14, #0a0c10);
+}
+.rr-print-eyebrow {
+  font-size: 12px; text-transform: uppercase; letter-spacing: 0.16em;
+  color: #7c8cff; font-family: var(--mono); font-weight: 600;
+}
+.rr-print-h1 {
+  margin: 6px 0 0; font-size: 36px; font-weight: 700; letter-spacing: -0.02em;
+  color: #fff;
+}
+.rr-print-foot-meta {
+  font-size: 13px; color: #8a91a0; font-family: var(--mono);
+}
+
+/* Inline drawer: undo fixed scrim, lay out as a static panel */
+.rr-print-inline-drawer .rr-drawer-scrim {
+  position: static !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  display: block !important;
+  inset: auto !important;
+  animation: none !important;
+  padding: 28px 44px 44px;
+  height: auto;
+}
+.rr-print-inline-drawer .rr-drawer {
+  width: 100% !important;
+  height: auto !important;
+  border: 1px solid rgba(255,255,255,.14) !important;
+  border-radius: 14px;
+  overflow: visible !important;
+  animation: none !important;
+  background: linear-gradient(180deg, #0d0f14, #0a0c10) !important;
+}
+.rr-print-inline-drawer .rr-drawer-head { position: static !important; }
+
+/* Inline modal: same treatment */
+.rr-print-inline-modal .rr-modal-scrim {
+  position: static !important;
+  background: transparent !important;
+  backdrop-filter: none !important;
+  display: block !important;
+  inset: auto !important;
+  padding: 28px 44px 44px;
+  animation: none !important;
+}
+.rr-print-inline-modal .rr-modal {
+  width: 100% !important;
+  max-height: none !important;
+  margin: 0 auto;
+  max-width: 1100px;
+}
+.rr-print-inline-modal .rr-modal-body { overflow: visible !important; }
+
+/* Disable all animations + hover noise for print */
+*, *::before, *::after {
+  animation-duration: 0s !important;
+  transition: none !important;
+}
+
+/* Hide the Today pulse dot animation (already disabled via animation: 0s) */
+.rr-pill-pulse { display: none !important; }
+
+/* The drawer header buttons in print are noise */
+.rr-print-inline-drawer .rr-drawer-head-r .rr-icon-btn { display: none; }
+
+/* Make the timeline track render fully (no internal scroll) */
+.rr-print-page .rr-tl-scroll {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+/* PRINT MEDIA */
+@media print {
+  body { background: #07080a !important; }
+  .rr-print-page {
+    page-break-after: always;
+    break-after: page;
+    margin-top: 0 !important;
+    border-top: 0 !important;
+  }
+  .rr-print-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+  /* Hide on-screen separator */
+  .rr-print-page + .rr-print-page {
+    border-top: 0;
+    margin-top: 0;
+  }
+}
