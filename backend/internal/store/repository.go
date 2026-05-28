@@ -533,12 +533,24 @@ func (r *Repository) DeleteLock(ctx context.Context, id string) error {
 
 // ---------- Notifications ----------
 
+// notifyMaxAttempts dead-letters a notification after this many failed sends so
+// a permanently-broken webhook doesn't retry on every tick forever.
+const notifyMaxAttempts = 5
+
 func (r *Repository) ScheduleNotification(ctx context.Context, rolloutID string, seq int, channel string, fireAt time.Time) error {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO notifications (rollout_id, stage_seq, channel, fire_at)
 		VALUES ($1,$2,$3,$4)
 		ON CONFLICT DO NOTHING
 	`, rolloutID, seq, channel, fireAt)
+	return err
+}
+
+// DeleteUnsentNotifications removes all not-yet-sent notifications for a rollout.
+// Called before re-scheduling on update so a shifted stage time doesn't leave
+// stale rows that would fire at the old (now-wrong) time.
+func (r *Repository) DeleteUnsentNotifications(ctx context.Context, rolloutID string) error {
+	_, err := r.pool.Exec(ctx, `DELETE FROM notifications WHERE rollout_id=$1 AND sent_at IS NULL`, rolloutID)
 	return err
 }
 
@@ -578,7 +590,16 @@ func (r *Repository) MarkNotificationSent(ctx context.Context, id int64, errMsg 
 		_, err := r.pool.Exec(ctx, `UPDATE notifications SET sent_at=now(), last_error=NULL WHERE id=$1`, id)
 		return err
 	}
-	_, err := r.pool.Exec(ctx, `UPDATE notifications SET last_error=$2 WHERE id=$1`, id, errMsg)
+	// Failure: record the error and bump the attempt count. Once the cap is
+	// reached, dead-letter the row (set sent_at) so it stops being retried on
+	// every dispatcher tick.
+	_, err := r.pool.Exec(ctx, `
+		UPDATE notifications
+		SET last_error = $2,
+		    attempts   = attempts + 1,
+		    sent_at    = CASE WHEN attempts + 1 >= $3 THEN now() ELSE sent_at END
+		WHERE id = $1
+	`, id, errMsg, notifyMaxAttempts)
 	return err
 }
 

@@ -25,7 +25,8 @@ test('timeline page renders rollouts from the API', async ({ browser }) => {
   const ctx = await browser.newContext({ storageState: ADMIN.storagePath });
   const page = await ctx.newPage();
   await page.goto('/#/timeline');
-  await page.waitForLoadState('networkidle');
+  // No networkidle wait: the live-update WebSocket is a persistent connection,
+  // so the page is never truly "network idle". Wait on concrete UI instead.
   await expect(page.locator('.rr-tl-tracks')).toBeAttached({ timeout: 15_000 });
   await expect(page.locator('.rr-row-title').first()).toBeVisible({ timeout: 15_000 });
   // Pills are rendered async after the rollouts signal resolves.

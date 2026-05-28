@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -18,9 +19,19 @@ func recv(t *testing.T, c *Client) Event {
 	}
 }
 
+// mustRegister registers a client for the test goroutine and fails if capped.
+func mustRegister(t *testing.T, h *Hub, user string) *Client {
+	t.Helper()
+	c, ok := h.Register(user)
+	if !ok {
+		t.Fatalf("register %q unexpectedly at cap", user)
+	}
+	return c
+}
+
 func TestBroadcastDeliversToClient(t *testing.T) {
 	h := New()
-	c := h.Register()
+	c := mustRegister(t, h, "u1")
 
 	h.Broadcast("rollout", "r-1", "create")
 
@@ -35,7 +46,7 @@ func TestBroadcastDeliversToClient(t *testing.T) {
 
 func TestRevIsMonotonic(t *testing.T) {
 	h := New()
-	c := h.Register()
+	c := mustRegister(t, h, "u1")
 
 	h.Broadcast("lock", "l-1", "create")
 	h.Broadcast("lock", "l-1", "update")
@@ -53,7 +64,7 @@ func TestRevIsMonotonic(t *testing.T) {
 
 func TestUnregisterStopsDelivery(t *testing.T) {
 	h := New()
-	c := h.Register()
+	c := mustRegister(t, h, "u1")
 	h.Unregister(c)
 
 	h.Broadcast("product", "p-1", "update")
@@ -68,7 +79,7 @@ func TestUnregisterStopsDelivery(t *testing.T) {
 
 func TestSlowClientIsDroppedWithoutBlocking(t *testing.T) {
 	h := New()
-	c := h.Register()
+	c := mustRegister(t, h, "u1")
 
 	// Fill the buffer plus one extra; Broadcast must never block even though
 	// nothing is draining c.Send.
@@ -93,6 +104,31 @@ func TestSlowClientIsDroppedWithoutBlocking(t *testing.T) {
 	}
 }
 
+func TestPerUserConnectionCap(t *testing.T) {
+	h := New()
+	clients := make([]*Client, 0, maxPerUser)
+	for i := 0; i < maxPerUser; i++ {
+		c, ok := h.Register("alice")
+		if !ok {
+			t.Fatalf("registration %d should succeed (under cap)", i)
+		}
+		clients = append(clients, c)
+	}
+	// The next one for the same user must be rejected.
+	if _, ok := h.Register("alice"); ok {
+		t.Fatal("registration beyond cap should be rejected")
+	}
+	// A different user is unaffected.
+	if _, ok := h.Register("bob"); !ok {
+		t.Fatal("a different user should still be able to connect")
+	}
+	// Freeing one slot lets alice connect again.
+	h.Unregister(clients[0])
+	if _, ok := h.Register("alice"); !ok {
+		t.Fatal("after unregister, alice should be able to reconnect")
+	}
+}
+
 func TestConcurrentBroadcastAndRegistration(t *testing.T) {
 	h := New()
 
@@ -100,7 +136,7 @@ func TestConcurrentBroadcastAndRegistration(t *testing.T) {
 	stop := make(chan struct{})
 	var drainers sync.WaitGroup
 	for i := 0; i < 4; i++ {
-		c := h.Register()
+		c := mustRegister(t, h, fmt.Sprintf("drainer-%d", i))
 		drainers.Add(1)
 		go func() {
 			defer drainers.Done()
@@ -127,17 +163,22 @@ func TestConcurrentBroadcastAndRegistration(t *testing.T) {
 		}()
 	}
 
-	// Churn: register + unregister concurrently with broadcasts.
+	// Churn: register + unregister concurrently with broadcasts. Each goroutine
+	// uses its own user id and holds at most one connection at a time.
 	for i := 0; i < 8; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
+			user := fmt.Sprintf("churn-%d", i)
 			for j := 0; j < 200; j++ {
-				c := h.Register()
+				c, ok := h.Register(user)
+				if !ok {
+					continue
+				}
 				h.Broadcast("lock", "l", "create")
 				h.Unregister(c)
 			}
-		}()
+		}(i)
 	}
 
 	wg.Wait()

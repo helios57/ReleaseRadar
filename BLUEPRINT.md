@@ -146,10 +146,14 @@ read the parent `rollout_types.tasks`, insert one row per task into
 `rollout_tasks`. Every later mutation (`PATCH /api/rollouts/{}/tasks/{seq}`)
 operates on the rollout's own task rows.
 
-`notifications` is a write-once dispatch queue. A single goroutine
-(`internal/notify`) wakes every `RR_NOTIFY_TICK` and drains rows whose
-`fire_at <= now AND sent_at IS NULL`. On failure the row stays pending so the
-next tick retries.
+`notifications` is a dispatch queue. A single goroutine (`internal/notify`)
+wakes every `RR_NOTIFY_TICK` and drains rows whose `fire_at <= now AND sent_at
+IS NULL`. On failure the row records `last_error`, increments `attempts`, and
+retries on the next tick — until it hits `notifyMaxAttempts` (5), at which
+point it is dead-lettered (`sent_at` set) so a permanently-broken webhook
+doesn't spam Teams forever. Re-scheduling a rollout (on update) first deletes
+its unsent rows, so a shifted stage time never leaves a notification that would
+fire at the old time.
 
 ## 5. Teams webhook payload
 
@@ -320,6 +324,9 @@ the socket.
   pump (drains/ignores inbound frames, detects close). Either pump erroring
   cancels the context so both exit, the client is unregistered, and the socket
   closes — no goroutine leak. The accept origin is pinned to `RR_PUBLIC_URL`.
+  Each frame/ping write is bounded by a 10 s timeout so a peer with a frozen
+  receive window can't wedge the pump. Connections are capped at **8 per user**
+  (`maxPerUser`) so one session can't exhaust goroutines/memory.
 - Every mutation handler calls `Broadcast` **after** the DB commit succeeds.
 
 ### 9.3 Frontend (`core/live.service.ts`)
@@ -349,3 +356,15 @@ the socket.
 The nginx reverse proxy exposes `/api/ws` via an exact-match `location` with
 HTTP/1.1 `Upgrade` headers and a long `proxy_read_timeout`, so the socket isn't
 reaped while idle (the exact match wins over the `/api/` prefix's 60 s timeout).
+
+## 10. Known limitations / accepted risk
+
+- **Session revocation.** Sessions are stateless HMAC-signed cookies with an 8 h
+  TTL and no server-side store. Consequences: `logout` only clears the cookie
+  client-side; a copied cookie stays valid until expiry; an LDAP role change
+  (admin→readonly) takes effect only on the next login. This is an accepted
+  trade-off for the stateless design; if revocation is needed, add a per-actor
+  `session_epoch` embedded in the cookie and checked per request.
+- **Write-path validation** covers the high-impact cases (lock window/kind/title,
+  task status, and Postgres integrity-constraint violations now map to `400`
+  rather than `500`); some lower-risk required-field checks still rely on the DB.

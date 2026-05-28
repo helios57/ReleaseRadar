@@ -1,42 +1,46 @@
-import { test, expect, type APIRequestContext, type Browser } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { ADMIN, READONLY } from '../helpers/auth';
 
 /**
- * Live-update (WebSocket) coverage. A change made by one client must appear in
- * another open client without a manual reload, and the connection indicator
- * must report a healthy channel. We also assert that an existing row's DOM node
- * survives an update (a proxy for "no flicker": Angular reuses tracked nodes
- * rather than tearing the list down and rebuilding it).
+ * Live-update (WebSocket) coverage — driven the way a real user would.
  *
- * Each test seeds its own baseline rollout via the API so it never depends on
- * seed data or the list's default filter.
+ * The *source* of every change is a genuine UI action performed by one user in
+ * one browser context (creating a rollout through the modal, deleting it from
+ * its detail page). A second user, in a separate browser context, must see the
+ * effect propagate live — without a manual reload — and the connection
+ * indicator must report a healthy channel. No API shortcuts are used to trigger
+ * the change under test; the API is the thing whose live behaviour we're
+ * verifying end-to-end.
  */
 
-async function createRollout(
-  request: APIRequestContext,
-  prefix: string,
-): Promise<{ id: string; title: string }> {
+/** Create a rollout exactly as an admin would: open the modal, fill it, submit. */
+async function createRolloutViaUI(page: Page, prefix: string): Promise<{ id: string; title: string }> {
   const title = `${prefix} ${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  const res = await request.post('/api/rollouts', {
-    data: {
-      product: 'operator',
-      typeId: 'operator-feature',
-      title,
-      descExt: 'live-update e2e',
-      stages: [
-        {
-          env: 'non-prod',
-          startAt: new Date(Date.now() + 3_600_000).toISOString(),
-          durationNs: 3_600_000_000_000,
-          status: 'scheduled',
-        },
-      ],
-      pair: [],
-    },
-  });
-  expect(res.status()).toBe(201);
-  const body = await res.json();
-  return { id: body.id, title };
+  await page.goto('/');
+  await page.getByRole('button', { name: /New rollout/ }).first().click();
+
+  const modal = page.locator('[data-test="create-rollout-modal"]');
+  await expect(modal).toBeVisible();
+  await modal.locator('[data-test="rollout-product"]').selectOption('operator');
+  await modal.locator('[data-test="rollout-type"]').selectOption('operator-feature');
+  await modal.locator('[data-test="rollout-title"]').fill(title);
+  await modal.locator('[data-test="rollout-descext"]').fill('created via browser e2e');
+  await modal.locator('[data-test="rollout-submit"]').click();
+
+  // The app navigates to the new rollout's detail page; read the id from the URL.
+  await page.waitForURL(/#\/rollout\/[^/]+$/, { timeout: 15_000 });
+  const id = page.url().split('/rollout/')[1];
+  expect(id).toBeTruthy();
+  return { id, title };
+}
+
+/** Delete a rollout exactly as an admin would: from its detail page. */
+async function deleteRolloutViaUI(page: Page, id: string): Promise<void> {
+  await page.goto(`/#/rollout/${id}`);
+  await expect(page.locator('[data-test="rollout-detail"]')).toBeVisible({ timeout: 15_000 });
+  await page.locator('[data-test="delete-rollout"]').click();
+  await page.locator('[data-test="confirm-delete"]').click();
+  await expect(page.locator('[data-test="rollout-detail"]')).toHaveCount(0, { timeout: 15_000 });
 }
 
 test.describe('Live updates over WebSocket', () => {
@@ -53,85 +57,123 @@ test.describe('Live updates over WebSocket', () => {
     }
   });
 
-  test('a rollout created by an admin appears live in a readonly client', async ({ browser }) => {
-    const admin = await browser.newContext({ storageState: ADMIN.storagePath });
-    const reader = await browser.newContext({ storageState: READONLY.storagePath });
-    const page = await reader.newPage();
+  test('a rollout an admin creates in the UI appears live in a readonly client', async ({
+    browser,
+  }) => {
+    const adminCtx = await browser.newContext({ storageState: ADMIN.storagePath });
+    const readerCtx = await browser.newContext({ storageState: READONLY.storagePath });
+    const adminPage = await adminCtx.newPage();
+    const readerPage = await readerCtx.newPage();
     try {
-      // Seed a known baseline row via the API, independent of seed data.
-      const baseline = await createRollout(admin.request, 'live-baseline');
-
-      await page.goto('/#/list');
-      await expect(page.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
+      // Reader is watching the list with a healthy live channel.
+      await readerPage.goto('/#/list');
+      await expect(readerPage.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
         timeout: 15_000,
       });
-      // The baseline row is present after the initial (catch-up) fetch.
-      const baselineRow = page.locator(`[data-test="list-row-${baseline.id}"]`);
-      await expect(baselineRow).toBeVisible({ timeout: 15_000 });
-      const baselineHandle = await baselineRow.elementHandle();
+      await expect(readerPage.locator('.rr-list-table')).toBeVisible();
 
-      // Now create a SECOND rollout — it must arrive via the WS push (no reload).
-      const live = await createRollout(admin.request, 'live-create');
-      await expect(page.locator(`[data-test="list-row-${live.id}"]`)).toBeVisible({
+      // Capture a pre-existing (seeded) row to prove it is NOT recreated when the
+      // list updates — a proxy for "no flicker" (stable @for track key).
+      const existingRow = readerPage.locator('[data-test^="list-row-"]').first();
+      await expect(existingRow).toBeVisible();
+      const existingHandle = await existingRow.elementHandle();
+
+      // Admin creates a rollout through the modal in their own browser.
+      const { id } = await createRolloutViaUI(adminPage, 'live-ui-create');
+
+      // The reader sees it arrive via the WebSocket push — no reload. (An
+      // operator-feature rollout has a 3-stage cascade → one list row per
+      // stage, so scope to .first() for the strict-mode visibility check.)
+      await expect(readerPage.locator(`[data-test="list-row-${id}"]`).first()).toBeVisible({
         timeout: 15_000,
       });
-
-      // No-flicker proxy: the baseline row's node is still the same attached node
-      // (Angular reused it via the stable track key rather than re-creating it).
-      expect(baselineHandle).not.toBeNull();
-      expect(await baselineHandle!.evaluate((el) => el.isConnected)).toBe(true);
+      // The previously-rendered row node is still the same attached node.
+      expect(existingHandle).not.toBeNull();
+      expect(await existingHandle!.evaluate((el) => el.isConnected)).toBe(true);
     } finally {
-      await admin.close();
-      await reader.close();
+      await adminCtx.close();
+      await readerCtx.close();
     }
   });
 
-  test('a rollout deleted by an admin disappears live in a readonly client', async ({ browser }) => {
-    const admin = await browser.newContext({ storageState: ADMIN.storagePath });
-    const reader = await browser.newContext({ storageState: READONLY.storagePath });
-    const page = await reader.newPage();
+  test('a rollout an admin deletes in the UI disappears live in a readonly client', async ({
+    browser,
+  }) => {
+    const adminCtx = await browser.newContext({ storageState: ADMIN.storagePath });
+    const readerCtx = await browser.newContext({ storageState: READONLY.storagePath });
+    const adminPage = await adminCtx.newPage();
+    const readerPage = await readerCtx.newPage();
     try {
-      const target = await createRollout(admin.request, 'live-delete');
+      // Admin creates the rollout (UI), then the reader opens the list and sees it.
+      const { id } = await createRolloutViaUI(adminPage, 'live-ui-delete');
 
-      await page.goto('/#/list');
-      await expect(page.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
+      await readerPage.goto('/#/list');
+      await expect(readerPage.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
         timeout: 15_000,
       });
-      const row = page.locator(`[data-test="list-row-${target.id}"]`);
-      await expect(row).toBeVisible({ timeout: 15_000 });
+      // 3-stage cascade → one row per stage; .first() for the visibility check,
+      // the full locator (count) to confirm every row is gone after delete.
+      const rows = readerPage.locator(`[data-test="list-row-${id}"]`);
+      await expect(rows.first()).toBeVisible({ timeout: 15_000 });
 
-      // Delete via API; the readonly client must drop the row with no reload.
-      const del = await admin.request.delete(`/api/rollouts/${target.id}`);
-      expect(del.ok()).toBe(true);
-      await expect(row).toHaveCount(0, { timeout: 15_000 });
+      // Admin deletes it from the detail page; the reader's rows vanish live.
+      await deleteRolloutViaUI(adminPage, id);
+      await expect(rows).toHaveCount(0, { timeout: 15_000 });
     } finally {
-      await admin.close();
-      await reader.close();
+      await adminCtx.close();
+      await readerCtx.close();
     }
   });
 
-  test('two admin clients see each other live', async ({ browser }) => {
-    const a = await browser.newContext({ storageState: ADMIN.storagePath });
-    const b = await browser.newContext({ storageState: ADMIN.storagePath });
-    const pageA = await a.newPage();
-    const pageB = await b.newPage();
+  test('deleting the rollout a user is viewing shows a "deleted" state live', async ({
+    browser,
+  }) => {
+    const adminCtx = await browser.newContext({ storageState: ADMIN.storagePath });
+    const readerCtx = await browser.newContext({ storageState: READONLY.storagePath });
+    const adminPage = await adminCtx.newPage();
+    const readerPage = await readerCtx.newPage();
     try {
-      await pageA.goto('/#/list');
-      await pageB.goto('/#/list');
-      await expect(pageB.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
+      const { id } = await createRolloutViaUI(adminPage, 'live-ui-detail-delete');
+
+      // Reader opens the rollout's detail page and the live channel is healthy.
+      await readerPage.goto(`/#/rollout/${id}`);
+      await expect(readerPage.locator('[data-test="rollout-detail"]')).toBeVisible({
+        timeout: 15_000,
+      });
+      await expect(readerPage.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
         timeout: 15_000,
       });
 
-      const created = await createRollout(a.request, 'live-two-admin');
-      await expect(pageA.locator(`[data-test="list-row-${created.id}"]`)).toBeVisible({
-        timeout: 15_000,
-      });
-      await expect(pageB.locator(`[data-test="list-row-${created.id}"]`)).toBeVisible({
+      // Admin deletes it; the reader's open detail flips to the explicit
+      // "deleted" state (not stale, not a generic loading placeholder), no reload.
+      await deleteRolloutViaUI(adminPage, id);
+      await expect(readerPage.locator('[data-test="rollout-detail-deleted"]')).toBeVisible({
         timeout: 15_000,
       });
     } finally {
-      await a.close();
-      await b.close();
+      await adminCtx.close();
+      await readerCtx.close();
+    }
+  });
+
+  test('one admin sees another admin\'s UI change live', async ({ browser }) => {
+    const actorCtx = await browser.newContext({ storageState: ADMIN.storagePath });
+    const observerCtx = await browser.newContext({ storageState: ADMIN.storagePath });
+    const actorPage = await actorCtx.newPage();
+    const observerPage = await observerCtx.newPage();
+    try {
+      await observerPage.goto('/#/list');
+      await expect(observerPage.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
+        timeout: 15_000,
+      });
+
+      const { id } = await createRolloutViaUI(actorPage, 'live-ui-two-admin');
+      await expect(observerPage.locator(`[data-test="list-row-${id}"]`).first()).toBeVisible({
+        timeout: 15_000,
+      });
+    } finally {
+      await actorCtx.close();
+      await observerCtx.close();
     }
   });
 });

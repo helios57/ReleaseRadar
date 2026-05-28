@@ -395,6 +395,13 @@
       </div>
     }
   </div>
+} @else if (deleted()) {
+  <div style="padding: 16px 18px;" class="rr-muted" data-test="rollout-detail-deleted">
+    <p>This rollout was deleted.</p>
+    <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="back()">
+      <rr-icon [d]="ICONS['chev']" [size]="13" /> Back to timeline
+    </button>
+  </div>
 } @else {
   <div style="padding: 16px 18px;" class="rr-muted" data-test="rollout-detail-loading">
     Loading rollout…

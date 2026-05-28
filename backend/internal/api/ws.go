@@ -8,6 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/yourorg/releaseradar/internal/middleware"
 )
 
 const (
@@ -17,6 +18,9 @@ const (
 	// wsReadLimit caps inbound frames. Clients are not expected to send data;
 	// this just bounds memory against a misbehaving peer.
 	wsReadLimit = 4 * 1024
+	// wsWriteTimeout bounds a single frame/ping write so a peer with a frozen
+	// receive window can't wedge the write-pump goroutine indefinitely.
+	wsWriteTimeout = 10 * time.Second
 )
 
 // ws upgrades the request to a WebSocket and streams live-update events. It is
@@ -49,7 +53,15 @@ func (h *handlers) ws(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	client := h.Hub.Register()
+	// Cap concurrent connections per user so one session can't exhaust
+	// goroutines/memory. The route is behind RequireSession, so a session is
+	// always present.
+	sess, _ := middleware.WithSession(r)
+	client, ok := h.Hub.Register(sess.ID)
+	if !ok {
+		conn.Close(websocket.StatusPolicyViolation, "too many connections")
+		return
+	}
 	defer h.Hub.Unregister(client)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
@@ -73,11 +85,17 @@ func (h *handlers) ws(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case ev := <-client.Send:
-			if err := wsjson.Write(ctx, conn, ev); err != nil {
+			wctx, c := context.WithTimeout(ctx, wsWriteTimeout)
+			err := wsjson.Write(wctx, conn, ev)
+			c()
+			if err != nil {
 				return
 			}
 		case <-ticker.C:
-			if err := conn.Ping(ctx); err != nil {
+			wctx, c := context.WithTimeout(ctx, wsWriteTimeout)
+			err := conn.Ping(wctx)
+			c()
+			if err != nil {
 				return
 			}
 		}

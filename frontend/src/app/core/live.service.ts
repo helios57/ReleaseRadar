@@ -161,6 +161,12 @@ export class LiveService {
   /** Socket closed or errored: mark reconnecting and schedule a retry. */
   private handleDrop(): void {
     this.connecting = false;
+    // Detach the dropped socket's handlers so a late buffered frame from it
+    // can't poison lastRev for the fresh socket (which resets lastRev to 0).
+    const dead = this.socket;
+    if (dead) {
+      dead.onopen = dead.onclose = dead.onerror = dead.onmessage = null;
+    }
     this.socket = null;
     if (this.stableTimer) {
       clearTimeout(this.stableTimer);

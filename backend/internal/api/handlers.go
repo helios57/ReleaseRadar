@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/yourorg/releaseradar/internal/auth"
 	"github.com/yourorg/releaseradar/internal/calendar"
@@ -303,6 +304,10 @@ func (h *handlers) createLock(w http.ResponseWriter, r *http.Request) {
 		h.badRequestBody(w, err)
 		return
 	}
+	if msg := normalizeAndValidateLock(&in); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
+		return
+	}
 	if in.ID == "" {
 		in.ID = "l-" + uuid.NewString()[:8]
 	}
@@ -322,6 +327,10 @@ func (h *handlers) updateLock(w http.ResponseWriter, r *http.Request) {
 	var in domain.Lock
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		h.badRequestBody(w, err)
+		return
+	}
+	if msg := normalizeAndValidateLock(&in); msg != "" {
+		http.Error(w, msg, http.StatusBadRequest)
 		return
 	}
 	in.ID = id
@@ -382,6 +391,12 @@ func stripInternal(r domain.Rollout) domain.Rollout {
 // rules: non-prod ≥ 1h, prod1 ≥ 1w, prod2 ≥ 2w. We pick the largest standard
 // advance window (≥ available time-to-start) so we don't fire in the past.
 func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
+	// Clear any previously-scheduled-but-unsent rows first so an updated stage
+	// time doesn't leave stale notifications that fire at the old time. On
+	// create this is a harmless no-op.
+	if err := h.Repo.DeleteUnsentNotifications(r.Context(), ro.ID); err != nil {
+		h.Logger.Error("clear stale notifications", "err", err, "rollout", ro.ID)
+	}
 	for i, st := range ro.Stages {
 		var channel string
 		var advances []time.Duration
@@ -417,6 +432,28 @@ func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
 	}
 }
 
+// normalizeAndValidateLock applies defaults (empty kind → "manual") and returns
+// a client-facing message if the lock is invalid, or "" if it's OK. Keeps bad
+// input from reaching the DB CHECK constraint as a 500.
+func normalizeAndValidateLock(in *domain.Lock) string {
+	in.Title = strings.TrimSpace(in.Title)
+	if in.Title == "" {
+		return "title is required"
+	}
+	if in.Kind == "" {
+		in.Kind = "manual"
+	}
+	switch in.Kind {
+	case "manual", "holiday", "window":
+	default:
+		return "kind must be one of: manual, holiday, window"
+	}
+	if !in.EndAt.After(in.StartAt) {
+		return "endAt must be after startAt"
+	}
+	return ""
+}
+
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -429,6 +466,14 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 func (h *handlers) writeErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	// A Postgres integrity-constraint violation (class 23 — FK, unique, check,
+	// not-null) is caused by bad client input, not a server fault: report 400.
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "23") {
+		h.Logger.Warn("constraint violation", "code", pgErr.Code, "constraint", pgErr.ConstraintName)
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 	h.Logger.Error("request failed", "err", err)

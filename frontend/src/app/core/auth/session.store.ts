@@ -1,5 +1,4 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { HttpErrorResponse } from '@angular/common/http';
 import { ApiService } from '../api/api.service';
 import { Role, SessionUser } from '../models/rollout.models';
 
@@ -21,10 +20,11 @@ export class SessionStore {
           this.loaded.set(true);
           resolve();
         },
-        error: (e: HttpErrorResponse) => {
+        error: () => {
+          // Any failure (401 = anonymous, or transient) → no user; the shell
+          // renders a "Sign in" link to /auth/login.
           this.user.set(null);
           this.loaded.set(true);
-          // 401 = anonymous; the shell renders a "Sign in" link to /auth/login.
           resolve();
         },
       });

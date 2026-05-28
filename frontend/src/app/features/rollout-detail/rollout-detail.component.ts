@@ -1,7 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { EMPTY, catchError, combineLatest, map, of, switchMap } from 'rxjs';
+import { EMPTY, catchError, combineLatest, map, of, switchMap, tap } from 'rxjs';
 
 import { ApiService } from '../../core/api/api.service';
 import { SessionStore } from '../../core/auth/session.store';
@@ -51,15 +52,33 @@ export class RolloutDetailComponent {
 
   private readonly id$ = this.route.paramMap.pipe(map((p) => p.get('id')));
 
+  // True once we've successfully loaded the rollout at least once. Lets the
+  // template tell "still loading" apart from "was here, now deleted".
+  private readonly hadRollout = signal(false);
+
   protected readonly rollout = toSignal(
     combineLatest([this.id$, this.bus.tick$]).pipe(
-      // On a transient refetch error, complete WITHOUT emitting (EMPTY) so the
-      // last good value is retained instead of flashing the whole page to the
-      // "Loading rollout…" placeholder on every failed live bump.
-      switchMap(([id]) => (id ? this.api.rollout(id).pipe(catchError(() => EMPTY)) : of(null))),
+      switchMap(([id]) =>
+        id
+          ? this.api.rollout(id).pipe(
+              // A 404 is permanent (the rollout was deleted, e.g. by another
+              // client over the live channel) → emit null so the view leaves
+              // the stale populated state. Any other (transient) error
+              // completes WITHOUT emitting (EMPTY) so the last good value is
+              // retained — no flash to a placeholder on a flaky live bump.
+              catchError((e: HttpErrorResponse) => (e.status === 404 ? of(null) : EMPTY)),
+            )
+          : of(null),
+      ),
+      tap((r) => {
+        if (r) this.hadRollout.set(true);
+      }),
     ),
     { initialValue: null as Rollout | null },
   );
+
+  /** The rollout existed and is now gone (deleted elsewhere). */
+  protected readonly deleted = computed(() => this.hadRollout() && this.rollout() === null);
 
   // Off tick$ so a live rollout-type edit refreshes the resolved `type`.
   // switchMap retains the previous list in-flight (no flash to empty).
