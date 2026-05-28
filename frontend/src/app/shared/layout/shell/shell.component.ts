@@ -78,6 +78,17 @@ interface NavItem {
           opacity: 0.35;
         }
       }
+      /* Footer health dot tracks the live status (the design-system dot is a
+         hardcoded green, so override by status here). */
+      .rr-foot-row[data-status='reconnecting'] .rr-status-dot {
+        background: var(--warn);
+        box-shadow: 0 0 6px var(--warn);
+      }
+      .rr-foot-row[data-status='offline'] .rr-status-dot,
+      .rr-foot-row[data-status='connecting'] .rr-status-dot {
+        background: var(--muted-2);
+        box-shadow: none;
+      }
     `,
   ],
 })

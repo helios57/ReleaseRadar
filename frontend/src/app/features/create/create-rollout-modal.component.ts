@@ -20,16 +20,18 @@ import { cascadeStages, formatDelay, getStage } from '../../core/stage';
 import { scheduleWarnings } from '../../core/schedule-rules';
 import { Product, RolloutType } from '../../core/models/rollout.models';
 import { IconComponent, ICONS } from '../../shared/ui/icon.component';
+import { FocusTrapDirective } from '../../shared/a11y/focus-trap.directive';
 
 @Component({
   selector: 'rr-create-rollout-modal',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent],
+  imports: [IconComponent, FocusTrapDirective],
   host: { '(document:keydown.escape)': 'close()' },
   template: `
     <div class="rr-modal-scrim" (click)="close()">
       <div
         class="rr-modal"
+        rrFocusTrap
         (click)="$event.stopPropagation()"
         data-test="create-rollout-modal"
         role="dialog"

@@ -7,7 +7,7 @@ iCalendar feed for Outlook subscriptions.
 * **Backend:** Go (module directive `go 1.25.0`; the enhanced method+wildcard
   `net/http` routing from 1.22+ is used directly). pgx + standard
   `database/sql`. No web framework. WebSocket via `github.com/coder/websocket`.
-* **Frontend:** Angular 21 zoneless standalone app, Signals + Signal Forms,
+* **Frontend:** Angular 21 zoneless standalone app, Signals throughout,
   Tailwind v4, Vitest as the default test runner.
 * **Auth:** OIDC via Microsoft Entra ID (in production) or **Keycloak** (in
   the docker stack). LDAP-group → role resolution; works with AD's

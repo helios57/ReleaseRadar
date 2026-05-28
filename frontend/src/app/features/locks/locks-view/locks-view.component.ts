@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, of, switchMap } from 'rxjs';
+import { catchError, of, switchMap, tap } from 'rxjs';
 
 import { ApiService } from '../../../core/api/api.service';
 import { DialogStore } from '../../../core/dialog.store';
@@ -79,7 +79,9 @@ import { BadgeComponent } from '../../../shared/ui/badge.component';
           }
         </div>
       } @empty {
-        <div class="rr-muted" style="margin-top:12px;">No locks defined.</div>
+        <div class="rr-muted" style="margin-top:12px;">
+          {{ loaded() ? 'No locks defined.' : 'Loading…' }}
+        </div>
       }
     </div>
   `,
@@ -93,9 +95,14 @@ export class LocksViewComponent {
   protected productColor = productColor;
   protected readonly canEdit = computed(() => this.session.canEdit());
   protected readonly confirmingId = signal<string | null>(null);
+  private readonly _loaded = signal(false);
+  protected readonly loaded = this._loaded.asReadonly();
 
   protected readonly locks = toSignal(
-    this.bus.tick$.pipe(switchMap(() => this.api.locks().pipe(catchError(() => of<Lock[]>([]))))),
+    this.bus.tick$.pipe(
+      switchMap(() => this.api.locks().pipe(catchError(() => of<Lock[]>([])))),
+      tap(() => this._loaded.set(true)),
+    ),
     { initialValue: [] as Lock[] },
   );
 

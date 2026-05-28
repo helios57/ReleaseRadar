@@ -194,9 +194,14 @@ the e2e suite immediately.
 | prod1     | 1 w, 1 d, 1 h                            |
 | prod2     | 2 w, 1 w, 1 h                            |
 
-If the rollout is created *after* a window's natural fire-time, the fire-time
-is clipped to "now+1s" so at least one notification still goes out on the
-next dispatcher tick.
+Advance windows already in the past at scheduling time are **dropped** (so a
+short-lead stage — e.g. a hotfix whose prod stage is only 24 h out — does not
+fire a spurious "1 w / 2 w" announcement immediately). Only if *every* window
+for a stage is already past is a single catch-up notification enqueued at
+"now+1s", so the stage is still announced exactly once on the next dispatcher
+tick. Rescheduling on update replaces a rollout's unsent rows in one
+transaction; permanently-failing sends are dead-lettered after 5 attempts
+(see §4).
 
 ## 6. Frontend
 
@@ -213,7 +218,7 @@ next dispatcher tick.
 - **Session bootstrap**: `provideAppInitializer(() => inject(SessionStore).load())`
   blocks the first render until `/api/me` resolves, so role-gated UI never
   flashes the wrong state.
-- **Design system**: a single `design.css` (88 KB, copied from the Design
+- **Design system**: a single `design.css` (~86 KiB, copied from the Design
   Bundle) ships unmodified. Tailwind v4 is layered on top via a separate
   entry-point CSS file and used for layout one-offs.
 
@@ -262,7 +267,7 @@ watchdog → `npm test` → always teardown + collect logs to `./e2e-logs/`.
 | `RR_LISTEN_ADDR`           | `:8080`                  |       |
 | `RR_PUBLIC_URL`            | `http://localhost:8080`  | Browser-facing origin |
 | `RR_DATABASE_URL`          | *(required)*             | pgx DSN |
-| `RR_SESSION_SECRET`        | *(required)*             | HMAC key |
+| `RR_SESSION_SECRET`        | *(required, ≥16 chars)*  | HMAC key |
 | `RR_SEED_ON_START`         | `false`                  | seed demo data if empty |
 | `RR_NOTIFY_TICK`           | `30s`                    | dispatcher loop interval |
 | `RR_OIDC_ISSUER`           | —                        | Token `iss` claim |
@@ -270,7 +275,11 @@ watchdog → `npm test` → always teardown + collect logs to `./e2e-logs/`.
 | `RR_OIDC_CLIENT_ID`        | —                        |       |
 | `RR_OIDC_CLIENT_SECRET`    | —                        |       |
 | `RR_OIDC_REDIRECT_URL`     | —                        |       |
+| `RR_OIDC_SCOPES`           | `openid,profile,email`   | comma-separated scopes |
 | `RR_LDAP_URL`              | —                        | `ldap://` or `ldaps://` |
+| `RR_LDAP_BIND_DN`          | *(empty)*                | service-account DN for the search bind |
+| `RR_LDAP_BIND_PASS`        | *(empty)*                | service-account password |
+| `RR_LDAP_BASE_DN`          | *(empty)*                | search base for users/groups |
 | `RR_LDAP_USER_FILTER`      | `(userPrincipalName=%s)` | AD-style by default |
 | `RR_LDAP_GROUP_ATTR`       | `memberOf`               | AD path |
 | `RR_LDAP_GROUP_FILTER`     | *(empty)*                | Set for OpenLDAP-style group search |
@@ -368,3 +377,18 @@ reaped while idle (the exact match wins over the `/api/` prefix's 60 s timeout).
 - **Write-path validation** covers the high-impact cases (lock window/kind/title,
   task status, and Postgres integrity-constraint violations now map to `400`
   rather than `500`); some lower-risk required-field checks still rely on the DB.
+
+### Defense-in-depth measures in place
+
+- **Cookie `Secure`** is set from `r.TLS` **or** `X-Forwarded-Proto: https`, so
+  the session/OIDC cookies are marked Secure behind the TLS-terminating proxy
+  (the backend itself speaks plain HTTP).
+- **Request bodies** are capped at 1 MiB (`http.MaxBytesReader`) on the JSON
+  endpoints; the WS upgrade hijacks the connection and is unaffected.
+- **`RR_SESSION_SECRET`** must be ≥ 16 characters (rejected at startup otherwise).
+- **nginx** sends `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+  and `Referrer-Policy: strict-origin-when-cross-origin` on every response
+  (HSTS belongs at the TLS edge).
+- The WebSocket origin is pinned to `RR_PUBLIC_URL` (anti-CSWSH); the session
+  cookie is `SameSite=Lax` and there is no CORS config, so cross-site mutating
+  requests are blocked; the OIDC callback is protected by `state` + `nonce`.

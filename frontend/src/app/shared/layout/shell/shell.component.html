@@ -52,13 +52,13 @@
 
     @if (products().length) {
       <div class="rr-side-section">
-        <div class="rr-side-section-title">Filters</div>
+        <div class="rr-side-section-title">Products</div>
         <div class="rr-chip-list">
           @for (p of products(); track p.id) {
-            <button class="rr-chip">
+            <span class="rr-chip">
               <span class="rr-chip-dot" [style.background]="productColor(p.id)"></span>
               {{ p.name }}
-            </button>
+            </span>
           }
         </div>
       </div>
@@ -87,7 +87,7 @@
     </div>
 
     <div class="rr-side-foot">
-      <div class="rr-foot-row" data-test="footer-health">
+      <div class="rr-foot-row" [attr.data-status]="liveStatus()" data-test="footer-health">
         <span class="rr-status-dot"></span>
         {{ liveStatus() === 'live' ? 'Live updates connected' : liveLabel() }}
       </div>
@@ -109,12 +109,6 @@
         </div>
       </div>
 
-      <div class="rr-header-search">
-        <rr-icon [d]="ICONS['search']" [size]="14" />
-        <input placeholder="Search rollouts, brokers, tasks…" />
-        <kbd>⌘K</kbd>
-      </div>
-
       <div class="rr-header-right">
         <div
           class="rr-live"
@@ -129,9 +123,6 @@
           <span class="rr-live-label">{{ liveLabel() }}</span>
         </div>
         <div class="rr-divider"></div>
-        <button class="rr-btn rr-btn-ghost rr-btn-sm">
-          <rr-icon [d]="ICONS['cal']" [size]="13" /> Today
-        </button>
         <a class="rr-btn rr-btn-ghost rr-btn-sm" href="/api/calendar.ics">
           <rr-icon [d]="ICONS['download']" [size]="13" /> Export iCal
         </a>

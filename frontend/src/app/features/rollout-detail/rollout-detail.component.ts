@@ -17,6 +17,7 @@ import {
   RolloutType,
 } from '../../core/models/rollout.models';
 import { IconComponent, ICONS } from '../../shared/ui/icon.component';
+import { FocusTrapDirective } from '../../shared/a11y/focus-trap.directive';
 import { BadgeComponent } from '../../shared/ui/badge.component';
 
 function clone<T>(v: T): T {
@@ -26,7 +27,7 @@ function clone<T>(v: T): T {
 @Component({
   selector: 'rr-rollout-detail',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, BadgeComponent],
+  imports: [IconComponent, BadgeComponent, FocusTrapDirective],
   templateUrl: './rollout-detail.component.html',
 })
 export class RolloutDetailComponent {
@@ -63,7 +64,12 @@ export class RolloutDetailComponent {
   // "deleted" state for the new (still-loading) rollout.
   private readonly id$ = this.route.paramMap.pipe(
     map((p) => p.get('id')),
-    tap(() => this.hadRollout.set(false)),
+    tap(() => {
+      // Reset per-rollout transient state on navigation so a previous
+      // rollout's "deleted" flag or error banner doesn't leak into the next.
+      this.hadRollout.set(false);
+      this.actionError.set(null);
+    }),
   );
 
   protected readonly rollout = toSignal(

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, combineLatest, of, switchMap } from 'rxjs';
+import { catchError, combineLatest, of, switchMap, tap } from 'rxjs';
 
 import { ApiService } from '../../../core/api/api.service';
 import { DialogStore } from '../../../core/dialog.store';
@@ -67,6 +67,7 @@ const STATUS_TONE: Record<StageStatus, 'neutral' | 'info' | 'warn' | 'danger' | 
               <button
                 class="rr-seg-item"
                 [class.is-active]="windowFilter() === w.id"
+                [attr.aria-pressed]="windowFilter() === w.id"
                 (click)="windowFilter.set(w.id)"
               >
                 {{ w.label }}
@@ -82,6 +83,7 @@ const STATUS_TONE: Record<StageStatus, 'neutral' | 'info' | 'warn' | 'danger' | 
               <button
                 class="rr-seg-item"
                 [class.is-active]="statusFilter() === s.id"
+                [attr.aria-pressed]="statusFilter() === s.id"
                 (click)="statusFilter.set(s.id)"
               >
                 {{ s.label }} <span class="rr-list-pill">{{ count(s.id) }}</span>
@@ -164,14 +166,23 @@ const STATUS_TONE: Record<StageStatus, 'neutral' | 'info' | 'warn' | 'danger' | 
                   </td>
                   <td><rr-badge [tone]="statusTone(r.stage.status)" [dot]="true">{{ r.stage.status }}</rr-badge></td>
                   <td>
-                    <button class="rr-icon-btn" (click)="$event.stopPropagation(); open(r.rollout.id)" title="Open">
+                    <button
+                      class="rr-icon-btn"
+                      (click)="$event.stopPropagation(); open(r.rollout.id)"
+                      [attr.aria-label]="'Open ' + r.rollout.title"
+                      title="Open"
+                    >
                       <rr-icon [d]="ICONS['chev']" [size]="14" />
                     </button>
                   </td>
                 </tr>
               }
             } @empty {
-              <tr><td colspan="6" class="rr-list-empty">No rollouts match the current filters.</td></tr>
+              <tr>
+                <td colspan="6" class="rr-list-empty">
+                  {{ loaded() ? 'No rollouts match the current filters.' : 'Loading…' }}
+                </td>
+              </tr>
             }
           </tbody>
         </table>
@@ -208,6 +219,11 @@ export class ListViewComponent {
   protected readonly statusFilter = signal<string>('all');
   protected readonly productFilter = signal<string>('all');
 
+  // Distinguishes "first fetch still in flight" from "genuinely empty" so the
+  // table shows "Loading…" instead of "No rollouts match" on first paint.
+  private readonly _loaded = signal(false);
+  protected readonly loaded = this._loaded.asReadonly();
+
   private readonly data = toSignal(
     this.bus.tick$.pipe(
       switchMap(() =>
@@ -216,6 +232,7 @@ export class ListViewComponent {
           products: this.api.products().pipe(catchError(() => of<Product[]>([]))),
         }),
       ),
+      tap(() => this._loaded.set(true)),
     ),
     { initialValue: { rollouts: [] as Rollout[], products: [] as Product[] } },
   );

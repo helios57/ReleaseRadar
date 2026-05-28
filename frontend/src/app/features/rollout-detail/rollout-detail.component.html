@@ -378,6 +378,7 @@
       <div class="rr-modal-scrim" (click)="cancelDelete()">
         <div
           class="rr-modal rr-modal-sm"
+          rrFocusTrap
           (click)="$event.stopPropagation()"
           data-test="delete-confirm"
           role="dialog"
@@ -409,7 +410,7 @@
     }
   </div>
 } @else if (deleted()) {
-  <div style="padding: 16px 18px;" class="rr-muted" data-test="rollout-detail-deleted">
+  <div style="padding: 16px 18px;" class="rr-muted" role="alert" data-test="rollout-detail-deleted">
     @if (editing()) {
       <p data-test="deleted-while-editing">
         This rollout was deleted while you were editing — your unsaved changes were discarded.
