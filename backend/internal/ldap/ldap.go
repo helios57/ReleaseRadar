@@ -149,7 +149,14 @@ func classify(groups, adminGroups, readGroups []string) domain.Role {
 
 func dial(cfg config.LDAPConfig) (*goldap.Conn, error) {
 	if strings.HasPrefix(cfg.URL, "ldaps://") {
-		return goldap.DialURL(cfg.URL, goldap.DialWithTLSConfig(&tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: true})) //nolint:gosec // self-signed certs in dev/CI
+		// Verify against system roots by default; only skip verification when
+		// explicitly opted in (RR_LDAP_INSECURE_SKIP_VERIFY=true) for
+		// self-signed certs in dev/CI.
+		tlsCfg := &tls.Config{
+			MinVersion:         tls.VersionTLS12,
+			InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // gated behind opt-in config
+		}
+		return goldap.DialURL(cfg.URL, goldap.DialWithTLSConfig(tlsCfg))
 	}
 	return goldap.DialURL(cfg.URL)
 }

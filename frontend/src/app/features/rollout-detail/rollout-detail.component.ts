@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, combineLatest, map, of, switchMap } from 'rxjs';
+import { EMPTY, catchError, combineLatest, map, of, switchMap } from 'rxjs';
 
 import { ApiService } from '../../core/api/api.service';
 import { SessionStore } from '../../core/auth/session.store';
@@ -53,13 +53,20 @@ export class RolloutDetailComponent {
 
   protected readonly rollout = toSignal(
     combineLatest([this.id$, this.bus.tick$]).pipe(
-      switchMap(([id]) => (id ? this.api.rollout(id).pipe(catchError(() => of(null))) : of(null))),
+      // On a transient refetch error, complete WITHOUT emitting (EMPTY) so the
+      // last good value is retained instead of flashing the whole page to the
+      // "Loading rollout…" placeholder on every failed live bump.
+      switchMap(([id]) => (id ? this.api.rollout(id).pipe(catchError(() => EMPTY)) : of(null))),
     ),
     { initialValue: null as Rollout | null },
   );
 
+  // Off tick$ so a live rollout-type edit refreshes the resolved `type`.
+  // switchMap retains the previous list in-flight (no flash to empty).
   private readonly types = toSignal(
-    this.api.rolloutTypes().pipe(catchError(() => of<RolloutType[]>([]))),
+    this.bus.tick$.pipe(
+      switchMap(() => this.api.rolloutTypes().pipe(catchError(() => of<RolloutType[]>([])))),
+    ),
     { initialValue: [] as RolloutType[] },
   );
   private readonly allLocks = toSignal(

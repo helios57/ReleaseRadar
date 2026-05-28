@@ -49,9 +49,10 @@ there is exactly one source of truth for payload shape.
 | `action` | string | `create` \| `update` \| `delete`                              |
 | `rev`    | number | monotonic, process-global, increases on every broadcast       |
 
-**Client → server:** none required. The server ignores inbound frames except
-pong. The server sends a control ping every ~20s; a client that fails to pong
-within the read deadline is dropped.
+**Client → server:** none required. The server ignores inbound frames. The
+server sends a control ping every ~20s; if the ping (or the read pump) errors
+because the peer is gone, the connection's context is cancelled and the client
+is dropped.
 
 **Connection lifecycle:** on connect the server sends nothing special; the
 client triggers one refetch on (re)connect to catch anything missed while

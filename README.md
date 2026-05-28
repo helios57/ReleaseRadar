@@ -4,9 +4,9 @@ Deployment-orchestration + calendar dashboard with Microsoft Entra SSO, LDAP
 group-based authorization, Microsoft Teams (Workflows) notifications, and an
 iCalendar feed for Outlook subscriptions.
 
-* **Backend:** Go 1.25 (toolchain auto-resolved from `go-oidc`; the module
-  directive is `go 1.22` so the enhanced `net/http` routing in 1.22+ is the
-  hard floor). pgx + standard `database/sql`. No web framework.
+* **Backend:** Go (module directive `go 1.25.0`; the enhanced method+wildcard
+  `net/http` routing from 1.22+ is used directly). pgx + standard
+  `database/sql`. No web framework. WebSocket via `github.com/coder/websocket`.
 * **Frontend:** Angular 21 zoneless standalone app, Signals + Signal Forms,
   Tailwind v4, Vitest as the default test runner.
 * **Auth:** OIDC via Microsoft Entra ID (in production) or **Keycloak** (in
@@ -17,6 +17,9 @@ iCalendar feed for Outlook subscriptions.
   supported (retired April 2026).
 * **CalDAV:** read-only iCalendar feed at `GET /api/calendar.ics`; readonly
   users are explicitly allowed to subscribe.
+* **Live updates:** a WebSocket at `GET /api/ws` pushes tiny change events so
+  every open client refetches and stays in sync within ~150 ms — no reload, no
+  flicker. A header indicator shows channel health. See **BLUEPRINT.md §9**.
 
 See **[BLUEPRINT.md](./BLUEPRINT.md)** for the architecture deep-dive (login
 flow, data model, scheduler, test architecture).
@@ -25,7 +28,8 @@ flow, data model, scheduler, test architecture).
 
 ```
 backend/                Go service (cmd, internal/{api,auth,calendar,config,
-                        domain,ldap,middleware,notify,store,teams})
+                        domain,hub,ldap,middleware,notify,store,teams})
+                        — hub = in-process WebSocket fan-out for live updates
 frontend/               Angular 21 SPA + nginx Dockerfile + reverse-proxy conf
 mock-teams/             Tiny Node webhook receiver used by e2e tests
 infra/
@@ -94,11 +98,14 @@ Specs (see `e2e/tests/`):
 | ------------------------------- | ----------------------------------------------------- |
 | `global.setup.ts`               | Real Keycloak login for alice + bob, storageState saved |
 | `auth.spec.ts`                  | anonymous → 401, role mapping, logout clears session  |
-| `authorization.spec.ts`         | readonly → 403 matrix, internal-field stripping       |
+| `authorization.spec.ts`         | readonly → 403 matrix, internal-field stripping, readonly GET locks/products |
 | `crud.spec.ts`                  | Create rollout + lock, task inheritance, task PATCH   |
+| `requirements.spec.ts`          | Rollout/lock update+delete, 9 rollout types, task logging, iCal |
 | `calendar.spec.ts`              | iCal feed for both roles + RFC 5545 fold limit        |
 | `teams-notifications.spec.ts`   | Async dispatch to mock-teams, Adaptive Card envelope  |
-| `ui.spec.ts`                    | SPA: New-rollout button gated on role                 |
+| `live-updates.spec.ts`          | WebSocket: live create/delete propagation, "Live" indicator, no-flicker |
+| `ui-crud.spec.ts`               | SPA: create/execute/edit/delete via modals + detail page |
+| `ui.spec.ts`                    | SPA: New-rollout button gated on role, timeline render |
 
 ## Running outside docker
 

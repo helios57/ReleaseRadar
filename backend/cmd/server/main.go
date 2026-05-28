@@ -13,6 +13,7 @@ import (
 	"github.com/yourorg/releaseradar/internal/api"
 	"github.com/yourorg/releaseradar/internal/auth"
 	"github.com/yourorg/releaseradar/internal/config"
+	"github.com/yourorg/releaseradar/internal/hub"
 	"github.com/yourorg/releaseradar/internal/ldap"
 	"github.com/yourorg/releaseradar/internal/notify"
 	"github.com/yourorg/releaseradar/internal/store"
@@ -67,11 +68,14 @@ func main() {
 	scheduler := notify.NewScheduler(repo, teamsClient, logger, cfg.Notify.Tick)
 	go scheduler.Run(ctx)
 
+	liveHub := hub.New()
+
 	mux := api.NewRouter(api.Deps{
 		Repo:      repo,
 		OIDC:      oidc,
 		LDAP:      ldapResolver,
 		Sessions:  sessions,
+		Hub:       liveHub,
 		Logger:    logger,
 		PublicURL: cfg.PublicURL,
 	})

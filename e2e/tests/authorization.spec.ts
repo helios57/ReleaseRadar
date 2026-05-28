@@ -53,6 +53,14 @@ test('readonly can list products (timeline-supporting data)', async ({ browser }
   await ctx.close();
 });
 
+test('readonly can list locks (timeline-supporting data)', async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: READONLY.storagePath });
+  const res = await ctx.request.get('/api/locks');
+  expect(res.status()).toBe(200);
+  expect(Array.isArray(await res.json())).toBeTruthy();
+  await ctx.close();
+});
+
 test('readonly cannot create a product (403)', async ({ browser }) => {
   const ctx = await browser.newContext({ storageState: READONLY.storagePath });
   const res = await ctx.request.post('/api/products', {

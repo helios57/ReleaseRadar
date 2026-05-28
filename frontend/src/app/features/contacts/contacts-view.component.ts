@@ -1,17 +1,17 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, of } from 'rxjs';
+import { catchError, of, switchMap } from 'rxjs';
 
 import { ApiService } from '../../core/api/api.service';
+import { RefreshBus } from '../../core/refresh.bus';
 import { productColor } from '../../core/stage';
 import { Product } from '../../core/models/rollout.models';
-import { IconComponent, ICONS } from '../../shared/ui/icon.component';
 import { BadgeComponent } from '../../shared/ui/badge.component';
 
 @Component({
   selector: 'rr-contacts-view',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [IconComponent, BadgeComponent],
+  imports: [BadgeComponent],
   template: `
     <div style="padding: 16px 18px;" data-test="contacts-view">
       <div class="rr-month-title">
@@ -69,11 +69,16 @@ import { BadgeComponent } from '../../shared/ui/badge.component';
 })
 export class ContactsViewComponent {
   private api = inject(ApiService);
-  protected ICONS = ICONS;
+  private bus = inject(RefreshBus);
   protected productColor = productColor;
 
+  // Refetch off tick$ so live product changes appear without reload.
+  // switchMap keeps the previous list during the in-flight window (no flash to
+  // empty); track key is the stable product id.
   protected readonly products = toSignal(
-    this.api.products().pipe(catchError(() => of<Product[]>([]))),
+    this.bus.tick$.pipe(
+      switchMap(() => this.api.products().pipe(catchError(() => of<Product[]>([])))),
+    ),
     { initialValue: [] as Product[] },
   );
 

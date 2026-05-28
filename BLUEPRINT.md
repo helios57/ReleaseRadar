@@ -15,6 +15,10 @@ brings four orthogonal capabilities together behind a single web application:
 4. **Microsoft Teams notifications** through the modern *Workflows* webhook
    (Adaptive Cards). Notifications are scheduled in advance per the cascade
    plan (1 h / 1 d / 1 w / 2 w windows depending on the stage env).
+5. **Live updates** over a WebSocket (`/api/ws`): a change made by any client
+   is reflected in every other open client within ~150 ms, with no manual
+   reload and no flicker. A connection-status indicator shows channel health.
+   See §9.
 
 ```
 ┌──────────┐     OIDC      ┌──────────┐     LDAPS     ┌──────────┐
@@ -48,8 +52,8 @@ brings four orthogonal capabilities together behind a single web application:
 | Service       | Image                                  | Internal port | External port |
 | ------------- | -------------------------------------- | ------------- | ------------- |
 | `postgres`    | `postgres:16-alpine`                   | 5432          | —             |
-| `openldap`    | `bitnami/openldap:2.6`                 | 1389          | —             |
-| `keycloak`    | `quay.io/keycloak/keycloak:26.0`       | 8080, 9000    | — (proxied)   |
+| `openldap`    | `osixia/openldap:1.5.0`                | 389           | —             |
+| `keycloak`    | `quay.io/keycloak/keycloak:26.0`       | 8080          | — (proxied)   |
 | `mock-teams`  | local build (`./mock-teams`)           | 4000          | 4000 (tests)  |
 | `backend`     | local build (`./backend`)              | 8080          | — (proxied)   |
 | `frontend`    | local build (`./frontend`, nginx)      | 80            | 8080          |
@@ -103,11 +107,17 @@ covered too (`RR_LDAP_GROUP_ATTR=memberOf`, no group filter).
 | `GET /api/products`            |  ✓    |    ✓     |   401     |
 | `GET /api/rollouts`            |  ✓    |  ✓ (filtered) | 401   |
 | `GET /api/rollouts/{id}`       |  ✓    |  ✓ (filtered) | 401   |
+| `GET /api/locks`               |  ✓    |    ✓     |   401     |
 | `GET /api/calendar.ics`        |  ✓    |    ✓     |   401     |
+| `GET /api/ws` (WebSocket)      |  ✓    |    ✓     |   401     |
 | `GET /api/rollout-types`       |  ✓    |  **403** |   401     |
+| `POST /api/products`           |  ✓    |  **403** |   401     |
+| `POST /api/rollout-types`      |  ✓    |  **403** |   401     |
 | `POST /api/rollouts`           |  ✓    |  **403** |   401     |
+| `PATCH/DELETE /api/rollouts/{id}` |  ✓ |  **403** |   401     |
+| `PATCH /api/rollouts/{}/tasks/{}` |  ✓ |  **403** |   401     |
 | `POST /api/locks`              |  ✓    |  **403** |   401     |
-| `PATCH /api/rollouts/{}/tasks/{}` |  ✓    |  **403** |   401     |
+| `PATCH/DELETE /api/locks/{id}` |  ✓    |  **403** |   401     |
 
 "filtered" = the server strips `descInt` and `risks` from the JSON payload
 *server-side* — readonly cannot bypass this with a hand-crafted request.
@@ -212,11 +222,14 @@ e2e/
  └── tests/
      ├── global.setup.ts         # logs alice + bob, saves storageState
      ├── auth.spec.ts            # /api/me, logout, anon 401
-     ├── authorization.spec.ts   # readonly→403 matrix, field stripping
+     ├── authorization.spec.ts   # readonly→403 matrix, field stripping, readonly GET locks/products
      ├── crud.spec.ts            # create rollout + lock, task patch
+     ├── requirements.spec.ts    # rollout/lock update+delete, 9 types, task logging, iCal
      ├── calendar.spec.ts        # iCal feed + RFC 5545 fold limit
      ├── teams-notifications.spec.ts # async wait for mock-teams /received
-     └── ui.spec.ts              # SPA: New-rollout button enabled/disabled
+     ├── live-updates.spec.ts    # WebSocket: live create/delete propagation, indicator, no-flicker
+     ├── ui-crud.spec.ts         # SPA: create/execute/edit/delete via modals + detail
+     └── ui.spec.ts              # SPA: role-gated New-rollout button, timeline render
 ```
 
 The setup project runs first, logs each test user through the *real* Keycloak
@@ -258,7 +271,81 @@ watchdog → `npm test` → always teardown + collect logs to `./e2e-logs/`.
 | `RR_LDAP_GROUP_ATTR`       | `memberOf`               | AD path |
 | `RR_LDAP_GROUP_FILTER`     | *(empty)*                | Set for OpenLDAP-style group search |
 | `RR_LDAP_GROUP_BASE_DN`    | *(empty)*                | "" → uses base DN |
-| `RR_LDAP_ADMIN_GROUPS`     | *(empty)*                | comma-separated full DNs |
-| `RR_LDAP_READ_GROUPS`      | *(empty)*                |       |
+| `RR_LDAP_ADMIN_GROUPS`     | *(empty)*                | **`;`-separated** full DNs |
+| `RR_LDAP_READ_GROUPS`      | *(empty)*                | **`;`-separated** full DNs |
+| `RR_LDAP_INSECURE_SKIP_VERIFY` | `false`              | skip `ldaps://` cert verify — dev/CI self-signed only |
 | `RR_TEAMS_WEBHOOK_PROD`    | —                        | TMS_PROD channel |
 | `RR_TEAMS_WEBHOOK_NONPROD` | —                        | TMS_NP channel |
+
+## 9. Live updates (WebSocket)
+
+Open clients stay in sync without polling. Every mutation broadcasts a tiny
+event; each client refetches through its existing role-filtered REST path.
+
+```
+mutation handler ── hub.Broadcast(entity,id,action) ──▶ hub ──▶ each WS client
+                                                                  │
+client onmessage ──▶ LiveService ── debounce 150ms ──▶ RefreshBus.bump()
+                                                                  │
+                              existing switchMap refetch (role-filtered REST)
+```
+
+### 9.1 Wire contract
+
+`GET /api/ws` upgrades to a WebSocket behind `RequireSession` (anonymous → 401
+**before** the upgrade). The server→client frame is intentionally tiny and
+carries **no domain data**:
+
+```json
+{ "entity": "rollout", "id": "r-42", "action": "create", "rev": 17 }
+```
+
+`entity ∈ {rollout, lock, product, rollout-type, task}`,
+`action ∈ {create, update, delete}`, `rev` is a process-global monotonic
+counter. Because the frame carries no payload, the role-based field-stripping
+(`descInt`/`risks`) is preserved automatically: each client refetches via the
+same REST endpoints, so a readonly user can never receive internal fields over
+the socket.
+
+### 9.2 Backend (`internal/hub` + `internal/api/ws.go`)
+
+- **`hub`** is a goroutine-safe registry. `Broadcast` assigns the next `rev`
+  (`atomic.Int64`) and does a **non-blocking** send to every client's buffered
+  channel (cap 32). A client whose buffer is full is *skipped* (slow-consumer
+  drop) — Broadcast never blocks the mutation path. This is safe because the
+  client reconnects and triggers one catch-up refetch, and any delivered later
+  event triggers a full refetch anyway.
+- **`ws.go`** runs two pumps over one request-derived, cancellable context: a
+  write pump (`wsjson.Write` of each event + a ~20 s server ping) and a read
+  pump (drains/ignores inbound frames, detects close). Either pump erroring
+  cancels the context so both exit, the client is unregistered, and the socket
+  closes — no goroutine leak. The accept origin is pinned to `RR_PUBLIC_URL`.
+- Every mutation handler calls `Broadcast` **after** the DB commit succeeds.
+
+### 9.3 Frontend (`core/live.service.ts`)
+
+- Opens a same-origin `ws(s)://…/api/ws`; exposes a `status` signal
+  (`connecting | live | reconnecting | offline`) rendered by the shell-header
+  indicator (`role="status"`, `aria-live`, reduced-motion-aware pulse).
+- On each event (newer `rev`) it triggers a **debounced** `RefreshBus.bump()`
+  (~150 ms) so a burst collapses into one refetch. On (re)connect it bumps once
+  (debounced) to catch up on anything missed while disconnected.
+- Reconnects with exponential backoff + jitter (0.5 s→8 s); the backoff only
+  resets after the connection stays open for a stability window, so an
+  accept-then-drop server can't cause a reconnect/refetch storm. `lastRev`
+  resets on each fresh socket so a backend restart (rev counter back to 0)
+  doesn't permanently wedge updates. Tears down via `DestroyRef`.
+
+### 9.4 No-flicker guarantee
+
+1. `bump()` → `switchMap` refetch; `combineLatest`/`forkJoin` only emit when
+   **all** inner requests complete, and on a transient error the stream
+   completes without emitting (`EMPTY`) — so `toSignal` keeps the **previous**
+   value and never flashes to empty/initialValue during a refetch.
+2. Every `@for` uses a **stable** `track` keyed on entity identity (rollout id,
+   lock id, product id, `env@startAt` for stages) so Angular reuses DOM nodes.
+3. The 150 ms debounce coalesces bursts into a single refetch.
+
+The nginx reverse proxy exposes `/api/ws` via an exact-match `location` with
+HTTP/1.1 `Upgrade` headers and a long `proxy_read_timeout`, so the socket isn't
+reaped while idle (the exact match wins over the `/api/` prefix's 60 s timeout).

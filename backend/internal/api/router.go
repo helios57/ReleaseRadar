@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/yourorg/releaseradar/internal/auth"
+	"github.com/yourorg/releaseradar/internal/hub"
 	"github.com/yourorg/releaseradar/internal/ldap"
 	"github.com/yourorg/releaseradar/internal/middleware"
 	"github.com/yourorg/releaseradar/internal/store"
@@ -17,6 +18,7 @@ type Deps struct {
 	OIDC      *auth.OIDC
 	LDAP      *ldap.Resolver
 	Sessions  *auth.SessionStore
+	Hub       *hub.Hub
 	Logger    *slog.Logger
 	PublicURL string
 }
@@ -38,6 +40,10 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("GET /api/rollouts/{id}", middleware.RequireSession(http.HandlerFunc(h.getRollout)))
 	mux.Handle("GET /api/locks", middleware.RequireSession(http.HandlerFunc(h.listLocks)))
 	mux.Handle("GET /api/calendar.ics", middleware.RequireSession(http.HandlerFunc(h.calendar)))
+
+	// Live-update WebSocket. RequireSession rejects anonymous callers with 401
+	// before the upgrade.
+	mux.Handle("GET /api/ws", middleware.RequireSession(http.HandlerFunc(h.ws)))
 
 	// Admin only — modifications + master-data details.
 	mux.Handle("GET /api/rollout-types", middleware.RequireAdmin(http.HandlerFunc(h.listRolloutTypes)))

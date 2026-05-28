@@ -62,7 +62,9 @@ export interface Rollout {
   descInt: string;
   risks: string;
   stages: RolloutStage[];
-  pair: string[];
+  // The API may return `null` for an empty pair (Go nil-slice marshaling), so
+  // consumers must guard with `?? []`. Backend also normalizes to `[]`.
+  pair: string[] | null;
   tasks: RolloutTask[];
   createdAt?: string;
   updatedAt?: string;

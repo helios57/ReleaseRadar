@@ -8,6 +8,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yourorg/releaseradar/internal/domain"
 )
@@ -103,17 +104,29 @@ func (f *folder) write(s string) {
 	_, f.err = io.WriteString(f.w, s)
 }
 
+// splitLine folds s into chunks of at most n octets, but never cuts in the
+// middle of a multi-byte UTF-8 rune. RFC 5545 §3.1 counts octets (not runes)
+// against the 75-octet line limit, so we back the cut up to the nearest rune
+// boundary; the resulting chunk is therefore ≤ n octets and always valid UTF-8.
 func splitLine(s string, n int) []string {
 	if len(s) <= n {
 		return []string{s}
 	}
-	out := []string{s[:n]}
-	for i := n; i < len(s); i += n {
-		end := i + n
-		if end > len(s) {
-			end = len(s)
+	var out []string
+	for len(s) > n {
+		cut := n
+		// Back up while we'd land in the middle of a rune (continuation byte).
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
 		}
-		out = append(out, s[i:end])
+		// Degenerate guard: a single rune longer than n octets (can't happen
+		// for valid UTF-8 with n≥4, but stay safe) — emit at least one octet.
+		if cut == 0 {
+			cut = n
+		}
+		out = append(out, s[:cut])
+		s = s[cut:]
 	}
+	out = append(out, s)
 	return out
 }

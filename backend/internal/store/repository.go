@@ -59,7 +59,7 @@ func (r *Repository) Products(ctx context.Context) ([]domain.Product, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.Product
+	out := []domain.Product{} // non-nil so an empty result marshals as [] not null
 	for rows.Next() {
 		var p domain.Product
 		if err := rows.Scan(&p.ID, &p.Name, &p.Owner, &p.Brokers); err != nil {
@@ -90,7 +90,7 @@ func (r *Repository) RolloutTypes(ctx context.Context) ([]domain.RolloutType, er
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.RolloutType
+	out := []domain.RolloutType{} // non-nil so an empty result marshals as [] not null
 	for rows.Next() {
 		var t domain.RolloutType
 		var tone string
@@ -102,10 +102,14 @@ func (r *Repository) RolloutTypes(ctx context.Context) ([]domain.RolloutType, er
 		t.Tone = domain.Tone(tone)
 		t.DelayProd1 = d1
 		t.DelayProd2 = d2
+		t.CascadePlan = []domain.CascadeStage{}
 		if len(cascadeJSON) > 0 {
 			if err := json.Unmarshal(cascadeJSON, &t.CascadePlan); err != nil {
 				return nil, fmt.Errorf("decode cascade for %s: %w", t.ID, err)
 			}
+		}
+		if t.Rules == nil {
+			t.Rules = []string{}
 		}
 		t.Tasks, err = r.rolloutTypeTasks(ctx, t.ID)
 		if err != nil {
@@ -134,10 +138,14 @@ func (r *Repository) RolloutType(ctx context.Context, id string) (domain.Rollout
 	t.Tone = domain.Tone(tone)
 	t.DelayProd1 = d1
 	t.DelayProd2 = d2
+	t.CascadePlan = []domain.CascadeStage{}
 	if len(cascadeJSON) > 0 {
 		if err := json.Unmarshal(cascadeJSON, &t.CascadePlan); err != nil {
 			return t, err
 		}
+	}
+	if t.Rules == nil {
+		t.Rules = []string{}
 	}
 	t.Tasks, err = r.rolloutTypeTasks(ctx, t.ID)
 	return t, err
@@ -180,7 +188,8 @@ func (r *Repository) rolloutTypeTasks(ctx context.Context, typeID string) ([]str
 		return nil, err
 	}
 	defer rows.Close()
-	var out []string
+	// Non-nil so callers JSON-encode an empty task list as `[]`, not `null`.
+	out := []string{}
 	for rows.Next() {
 		var d string
 		if err := rows.Scan(&d); err != nil {
@@ -202,7 +211,7 @@ func (r *Repository) Rollouts(ctx context.Context) ([]domain.Rollout, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.Rollout
+	out := []domain.Rollout{} // non-nil so an empty result marshals as [] not null
 	for rows.Next() {
 		var r0 domain.Rollout
 		if err := rows.Scan(&r0.ID, &r0.ProductID, &r0.TypeID, &r0.Title,
@@ -240,6 +249,13 @@ func (r *Repository) Rollout(ctx context.Context, id string) (domain.Rollout, er
 }
 
 func (r *Repository) hydrate(ctx context.Context, ro *domain.Rollout) error {
+	// Initialize list fields to non-nil empty slices so they JSON-encode as
+	// `[]` rather than `null` even when the rollout has no rows in a child
+	// table (clients rely on these always being arrays).
+	ro.Stages = []domain.RolloutStage{}
+	ro.Pair = []string{}
+	ro.Tasks = []domain.RolloutTask{}
+
 	// stages
 	rows, err := r.pool.Query(ctx, `
 		SELECT env, start_at, duration, status FROM rollout_stages WHERE rollout_id = $1 ORDER BY seq
@@ -427,6 +443,19 @@ func (r *Repository) DeleteRollout(ctx context.Context, id string) error {
 }
 
 func (r *Repository) UpdateRolloutTask(ctx context.Context, rolloutID string, seq int, status, reason, by string) error {
+	// Clamp the status the same way UpdateRollout does so an unexpected value
+	// can never reach the CHECK constraint.
+	if status != "" && status != "done" && status != "failed" {
+		status = ""
+	}
+	if status == "" {
+		// Un-completing a task: clear the completion log entry entirely.
+		_, err := r.pool.Exec(ctx, `
+			UPDATE rollout_tasks SET status='', reason=$3, completed_by=NULL, completed_at=NULL
+			WHERE rollout_id=$1 AND seq=$2
+		`, rolloutID, seq, reason)
+		return err
+	}
 	if _, err := r.pool.Exec(ctx, `
 		UPDATE rollout_tasks SET status=$3, reason=$4, completed_by=$5, completed_at=now()
 		WHERE rollout_id=$1 AND seq=$2
@@ -447,12 +476,15 @@ func (r *Repository) Locks(ctx context.Context) ([]domain.Lock, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []domain.Lock
+	out := []domain.Lock{} // non-nil so an empty result marshals as [] not null
 	for rows.Next() {
 		var l domain.Lock
 		if err := rows.Scan(&l.ID, &l.Title, &l.Description, &l.Contact, &l.StartAt, &l.EndAt,
 			&l.Products, &l.Kind, &l.CreatedBy, &l.CreatedAt); err != nil {
 			return nil, err
+		}
+		if l.Products == nil {
+			l.Products = []string{}
 		}
 		out = append(out, l)
 	}
@@ -460,6 +492,9 @@ func (r *Repository) Locks(ctx context.Context) ([]domain.Lock, error) {
 }
 
 func (r *Repository) CreateLock(ctx context.Context, l domain.Lock) (domain.Lock, error) {
+	if l.Products == nil {
+		l.Products = []string{}
+	}
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO locks (id, title, description, contact, start_at, end_at, products, kind, created_by)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -468,6 +503,9 @@ func (r *Repository) CreateLock(ctx context.Context, l domain.Lock) (domain.Lock
 }
 
 func (r *Repository) UpdateLock(ctx context.Context, l domain.Lock) (domain.Lock, error) {
+	if l.Products == nil {
+		l.Products = []string{}
+	}
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE locks
 		   SET title = $2, description = $3, contact = $4, start_at = $5, end_at = $6, products = $7, kind = $8

@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  DestroyRef,
   ElementRef,
   afterRenderEffect,
   computed,
@@ -156,6 +157,8 @@ export class TimelineViewComponent {
 
   protected totalHeight = computed(() => this.rollouts().length * ROW_H);
 
+  private ro: ResizeObserver | null = null;
+
   constructor() {
     // Auto-fit the day count to the available wrapper width.
     afterRenderEffect(() => {
@@ -167,10 +170,13 @@ export class TimelineViewComponent {
         if (n !== this.days()) this.days.set(n);
       };
       compute();
-      const ro = new ResizeObserver(compute);
-      ro.observe(el);
-      // ResizeObserver cleanup is automatic when host detaches.
+      // Disconnect any prior observer (effect re-run) before creating a new one.
+      this.ro?.disconnect();
+      this.ro = new ResizeObserver(compute);
+      this.ro.observe(el);
     });
+    // Explicit teardown so the observer (and its closure) is released on destroy.
+    inject(DestroyRef).onDestroy(() => this.ro?.disconnect());
   }
 
   protected stepWeek(delta: number): void {

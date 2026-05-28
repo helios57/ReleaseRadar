@@ -98,7 +98,15 @@ type Claims struct {
 }
 
 // Exchange swaps a code for an ID token and returns the verified claims.
-func (o *OIDC) Exchange(ctx context.Context, code string) (Claims, error) {
+//
+// expectedNonce is the value stored in the rr_oidc_nonce cookie at login time;
+// it MUST match the id_token's nonce claim (replay defense). An empty
+// expectedNonce is treated as a hard failure so a missing/cleared cookie can
+// never bypass the check.
+func (o *OIDC) Exchange(ctx context.Context, code, expectedNonce string) (Claims, error) {
+	if expectedNonce == "" {
+		return Claims{}, errors.New("missing nonce")
+	}
 	tok, err := o.oauth.Exchange(ctx, code)
 	if err != nil {
 		return Claims{}, fmt.Errorf("oauth exchange: %w", err)
@@ -110,6 +118,9 @@ func (o *OIDC) Exchange(ctx context.Context, code string) (Claims, error) {
 	idTok, err := o.verifier.Verify(ctx, raw)
 	if err != nil {
 		return Claims{}, fmt.Errorf("verify id_token: %w", err)
+	}
+	if idTok.Nonce != expectedNonce {
+		return Claims{}, errors.New("nonce mismatch")
 	}
 	var c Claims
 	if err := idTok.Claims(&c); err != nil {
@@ -190,4 +201,20 @@ func WriteOIDCCookies(w http.ResponseWriter, state, nonce string, secure bool) {
 	c2.Value = nonce
 	http.SetCookie(w, &c1)
 	http.SetCookie(w, &c2)
+}
+
+// ClearOIDCCookies evicts the transient state + nonce cookies. Called on
+// callback regardless of outcome so a stale nonce can't be replayed.
+func ClearOIDCCookies(w http.ResponseWriter, secure bool) {
+	for _, name := range []string{"rr_oidc_state", "rr_oidc_nonce"} {
+		http.SetCookie(w, &http.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			HttpOnly: true,
+			Secure:   secure,
+			SameSite: http.SameSiteLaxMode,
+			MaxAge:   -1,
+		})
+	}
 }

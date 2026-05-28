@@ -3,6 +3,7 @@ module github.com/yourorg/releaseradar
 go 1.25.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/coreos/go-oidc/v3 v3.18.0
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/google/uuid v1.6.0

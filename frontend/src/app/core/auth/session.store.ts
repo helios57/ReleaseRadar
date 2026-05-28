@@ -24,9 +24,7 @@ export class SessionStore {
         error: (e: HttpErrorResponse) => {
           this.user.set(null);
           this.loaded.set(true);
-          if (e.status === 401) {
-            // Anonymous — Shell will trigger /auth/login.
-          }
+          // 401 = anonymous; the shell renders a "Sign in" link to /auth/login.
           resolve();
         },
       });

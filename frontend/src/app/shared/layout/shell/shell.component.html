@@ -115,6 +115,19 @@
       </div>
 
       <div class="rr-header-right">
+        <div
+          class="rr-live"
+          role="status"
+          aria-live="polite"
+          [attr.aria-label]="'Live channel: ' + liveLabel()"
+          [attr.data-test]="'live-status'"
+          [attr.data-status]="liveStatus()"
+          [title]="'Live channel: ' + liveLabel()"
+        >
+          <span class="rr-live-dot" aria-hidden="true"></span>
+          <span class="rr-live-label">{{ liveLabel() }}</span>
+        </div>
+        <div class="rr-divider"></div>
         <button class="rr-btn rr-btn-ghost rr-btn-sm">
           <rr-icon [d]="ICONS['cal']" [size]="13" /> Today
         </button>

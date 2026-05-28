@@ -125,10 +125,10 @@
             ></div>
           }
 
-          @for (row of timelineRows(); track row.rollout?.id ?? $index; let rowIdx = $index) {
+          @for (row of timelineRows(); track row.rollout.id; let rowIdx = $index) {
             <div class="rr-row" [style.height.px]="ROW_H" [style.top.px]="rowIdx * ROW_H">
               <div class="rr-row-track">
-                @for (p of row.placed; track $index; let i = $index) {
+                @for (p of row.placed; track p.stage.env + '@' + p.stage.startAt; let i = $index) {
                   @if (i > 0) {
                     @if (cascadeStyle(row.placed[i - 1].idx, p.idx, p.meta.color); as cs) {
                       <div

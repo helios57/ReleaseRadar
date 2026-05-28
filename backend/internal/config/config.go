@@ -29,17 +29,21 @@ type OIDCConfig struct {
 }
 
 type LDAPConfig struct {
-	URL          string
-	BindDN       string
-	BindPass     string
-	BaseDN       string
-	UserFilter   string
-	GroupAttr    string // when set, read groups from this attribute on the user entry (AD memberOf style)
-	GroupBaseDN  string // when set, search this DN for groups containing the user
-	GroupFilter  string // template with %s = user DN, e.g. (&(objectClass=groupOfNames)(member=%s))
-	AdminGroups  []string
-	ReadGroups   []string
-	Timeout      time.Duration
+	URL         string
+	BindDN      string
+	BindPass    string
+	BaseDN      string
+	UserFilter  string
+	GroupAttr   string // when set, read groups from this attribute on the user entry (AD memberOf style)
+	GroupBaseDN string // when set, search this DN for groups containing the user
+	GroupFilter string // template with %s = user DN, e.g. (&(objectClass=groupOfNames)(member=%s))
+	AdminGroups []string
+	ReadGroups  []string
+	Timeout     time.Duration
+	// InsecureSkipVerify disables TLS certificate verification for ldaps://
+	// connections. Default false (verify against system roots); set
+	// RR_LDAP_INSECURE_SKIP_VERIFY=true only for self-signed certs in dev/CI.
+	InsecureSkipVerify bool
 }
 
 type TeamsConfig struct {
@@ -76,9 +80,10 @@ func Load() (Config, error) {
 			GroupBaseDN: env("RR_LDAP_GROUP_BASE_DN", ""),
 			GroupFilter: env("RR_LDAP_GROUP_FILTER", ""),
 			// DNs contain commas, so the group lists are semicolon-separated.
-			AdminGroups: splitList(env("RR_LDAP_ADMIN_GROUPS", ""), ";"),
-			ReadGroups:  splitList(env("RR_LDAP_READ_GROUPS", ""), ";"),
-			Timeout:     5 * time.Second,
+			AdminGroups:        splitList(env("RR_LDAP_ADMIN_GROUPS", ""), ";"),
+			ReadGroups:         splitList(env("RR_LDAP_READ_GROUPS", ""), ";"),
+			Timeout:            5 * time.Second,
+			InsecureSkipVerify: env("RR_LDAP_INSECURE_SKIP_VERIFY", "") == "true",
 		},
 		Teams: TeamsConfig{
 			WebhookProd:    env("RR_TEAMS_WEBHOOK_PROD", ""),

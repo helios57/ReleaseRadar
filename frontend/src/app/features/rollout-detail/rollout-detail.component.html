@@ -339,7 +339,7 @@
             </label>
           } @else {
             <div class="rr-pair">
-              @for (id of r.pair; track id) {
+              @for (id of (r.pair ?? []); track id) {
                 <div class="rr-pair-card">
                   <div>
                     <div class="rr-pair-name">{{ id }}</div>

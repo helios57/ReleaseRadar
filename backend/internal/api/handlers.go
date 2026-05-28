@@ -39,17 +39,28 @@ func (h *handlers) callback(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "OIDC not configured", http.StatusServiceUnavailable)
 		return
 	}
-	stateCookie, err := r.Cookie("rr_oidc_state")
-	if err != nil || stateCookie.Value != r.URL.Query().Get("state") {
+	// Read the transient state + nonce cookies, then clear them immediately
+	// (before writing any response header) so a stale nonce can never be
+	// replayed, regardless of how the rest of the callback turns out.
+	stateCookie, stateErr := r.Cookie("rr_oidc_state")
+	var expectedNonce string
+	if nonceCookie, nerr := r.Cookie("rr_oidc_nonce"); nerr == nil {
+		expectedNonce = nonceCookie.Value
+	}
+	auth.ClearOIDCCookies(w, r.TLS != nil)
+
+	if stateErr != nil || stateCookie.Value != r.URL.Query().Get("state") {
 		http.Error(w, "invalid state", http.StatusBadRequest)
 		return
 	}
+	// expectedNonce is the value we stored at login; an empty/missing cookie
+	// is a hard failure inside Exchange (no bypass).
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		http.Error(w, "missing code", http.StatusBadRequest)
 		return
 	}
-	claims, err := h.OIDC.Exchange(r.Context(), code)
+	claims, err := h.OIDC.Exchange(r.Context(), code, expectedNonce)
 	if err != nil {
 		h.Logger.Error("oidc exchange", "err", err)
 		http.Error(w, "auth exchange failed", http.StatusUnauthorized)
@@ -103,7 +114,7 @@ func (h *handlers) me(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) listProducts(w http.ResponseWriter, r *http.Request) {
 	products, err := h.Repo.Products(r.Context())
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, products)
@@ -112,16 +123,17 @@ func (h *handlers) listProducts(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) upsertProduct(w http.ResponseWriter, r *http.Request) {
 	var p domain.Product
 	if err := json.NewDecoder(r.Body).Decode(&p); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
 		return
 	}
 	if p.ID == "" {
 		p.ID = strings.ToLower(strings.ReplaceAll(p.Name, " ", "-"))
 	}
 	if err := h.Repo.UpsertProduct(r.Context(), p); err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	h.Hub.Broadcast("product", p.ID, "update")
 	writeJSON(w, http.StatusOK, p)
 }
 
@@ -130,7 +142,7 @@ func (h *handlers) upsertProduct(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) listRolloutTypes(w http.ResponseWriter, r *http.Request) {
 	types, err := h.Repo.RolloutTypes(r.Context())
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, types)
@@ -139,16 +151,17 @@ func (h *handlers) listRolloutTypes(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) upsertRolloutType(w http.ResponseWriter, r *http.Request) {
 	var t domain.RolloutType
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
 		return
 	}
 	if t.ID == "" {
 		t.ID = strings.ToLower(strings.ReplaceAll(t.Name, " ", "-"))
 	}
 	if err := h.Repo.UpsertRolloutType(r.Context(), t); err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	h.Hub.Broadcast("rollout-type", t.ID, "update")
 	writeJSON(w, http.StatusOK, t)
 }
 
@@ -157,7 +170,7 @@ func (h *handlers) upsertRolloutType(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) listRollouts(w http.ResponseWriter, r *http.Request) {
 	rs, err := h.Repo.Rollouts(r.Context())
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	sess, _ := middleware.WithSession(r)
@@ -177,7 +190,7 @@ func (h *handlers) getRollout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	sess, _ := middleware.WithSession(r)
@@ -190,7 +203,7 @@ func (h *handlers) getRollout(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) createRollout(w http.ResponseWriter, r *http.Request) {
 	var in domain.Rollout
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
 		return
 	}
 	if in.ID == "" {
@@ -200,11 +213,12 @@ func (h *handlers) createRollout(w http.ResponseWriter, r *http.Request) {
 	in.CreatedBy = sess.ID
 	out, err := h.Repo.CreateRollout(r.Context(), in)
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	// Schedule advance-warning notifications based on stage env.
 	h.scheduleNotifications(r, out)
+	h.Hub.Broadcast("rollout", out.ID, "create")
 	writeJSON(w, http.StatusCreated, out)
 }
 
@@ -212,7 +226,7 @@ func (h *handlers) updateRollout(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var in domain.Rollout
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
 		return
 	}
 	in.ID = id
@@ -222,20 +236,22 @@ func (h *handlers) updateRollout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	// Stages may have shifted — (re)schedule advance-warning notifications.
 	h.scheduleNotifications(r, out)
+	h.Hub.Broadcast("rollout", out.ID, "update")
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *handlers) deleteRollout(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.Repo.DeleteRollout(r.Context(), id); err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	h.Hub.Broadcast("rollout", id, "delete")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -251,14 +267,22 @@ func (h *handlers) updateTask(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
+		return
+	}
+	// Validate up front so an out-of-range status surfaces as 400 instead of
+	// hitting the DB CHECK constraint and bubbling up as a 500.
+	if body.Status != "" && body.Status != "done" && body.Status != "failed" {
+		http.Error(w, "invalid status", http.StatusBadRequest)
 		return
 	}
 	sess, _ := middleware.WithSession(r)
 	if err := h.Repo.UpdateRolloutTask(r.Context(), id, seq, body.Status, body.Reason, sess.ID); err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	// task events carry the parent rollout id so clients refetch the rollout.
+	h.Hub.Broadcast("task", id, "update")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -267,7 +291,7 @@ func (h *handlers) updateTask(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) listLocks(w http.ResponseWriter, r *http.Request) {
 	ls, err := h.Repo.Locks(r.Context())
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, ls)
@@ -276,7 +300,7 @@ func (h *handlers) listLocks(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) createLock(w http.ResponseWriter, r *http.Request) {
 	var in domain.Lock
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
 		return
 	}
 	if in.ID == "" {
@@ -286,9 +310,10 @@ func (h *handlers) createLock(w http.ResponseWriter, r *http.Request) {
 	in.CreatedBy = sess.ID
 	out, err := h.Repo.CreateLock(r.Context(), in)
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	h.Hub.Broadcast("lock", out.ID, "create")
 	writeJSON(w, http.StatusCreated, out)
 }
 
@@ -296,7 +321,7 @@ func (h *handlers) updateLock(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var in domain.Lock
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		h.badRequestBody(w, err)
 		return
 	}
 	in.ID = id
@@ -306,18 +331,20 @@ func (h *handlers) updateLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	h.Hub.Broadcast("lock", out.ID, "update")
 	writeJSON(w, http.StatusOK, out)
 }
 
 func (h *handlers) deleteLock(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.Repo.DeleteLock(r.Context(), id); err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
+	h.Hub.Broadcast("lock", id, "delete")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -326,7 +353,7 @@ func (h *handlers) deleteLock(w http.ResponseWriter, r *http.Request) {
 func (h *handlers) calendar(w http.ResponseWriter, r *http.Request) {
 	rs, err := h.Repo.Rollouts(r.Context())
 	if err != nil {
-		writeErr(w, err)
+		h.writeErr(w, err)
 		return
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
@@ -381,7 +408,11 @@ func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
 			if fireAt.Before(now) {
 				fireAt = now.Add(time.Second)
 			}
-			_ = h.Repo.ScheduleNotification(r.Context(), ro.ID, i, channel, fireAt)
+			if err := h.Repo.ScheduleNotification(r.Context(), ro.ID, i, channel, fireAt); err != nil {
+				// Don't fail the request — the rollout was already persisted;
+				// just record that this advance-warning couldn't be scheduled.
+				h.Logger.Error("schedule notification", "err", err, "rollout", ro.ID, "stage", i, "channel", channel)
+			}
 		}
 	}
 }
@@ -392,12 +423,23 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 	_ = json.NewEncoder(w).Encode(body)
 }
 
-func writeErr(w http.ResponseWriter, err error) {
+// writeErr maps an internal error to a client response. ErrNotFound becomes a
+// 404; everything else is logged server-side with the detail and returns a
+// generic 500 so we never leak raw error/SQL strings to the client.
+func (h *handlers) writeErr(w http.ResponseWriter, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	http.Error(w, err.Error(), http.StatusInternalServerError)
+	h.Logger.Error("request failed", "err", err)
+	http.Error(w, "internal error", http.StatusInternalServerError)
+}
+
+// badRequestBody logs the detailed decode error and returns a generic 400 so
+// parser internals (offsets, expected types) don't leak to the client.
+func (h *handlers) badRequestBody(w http.ResponseWriter, err error) {
+	h.Logger.Warn("decode request body", "err", err)
+	http.Error(w, "invalid request body", http.StatusBadRequest)
 }
 
 func initials(name string) string {
