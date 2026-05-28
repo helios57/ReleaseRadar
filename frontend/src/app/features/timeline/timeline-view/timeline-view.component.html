@@ -1,0 +1,202 @@
+<div class="rr-timeline" #wrapper>
+  <div class="rr-tl-toolbar">
+    <div class="rr-tl-toolbar-left">
+      <div class="rr-month-title">
+        <span>{{ formatMonthLabel(start()) }}</span>
+        <span class="rr-month-range">{{ formatRange() }}</span>
+      </div>
+      <div class="rr-nav-arrows">
+        <button class="rr-icon-btn" (click)="stepWeek(-7)" title="Previous week">
+          <rr-icon [d]="ICONS['chev']" [size]="14" />
+        </button>
+        <button class="rr-icon-btn" (click)="resetToToday()" title="Reset to today">·</button>
+        <button class="rr-icon-btn" (click)="stepWeek(7)" title="Next week">
+          <rr-icon [d]="ICONS['chev']" [size]="14" />
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="rr-tl-scroll">
+    <div class="rr-tl-grid" [style.width.px]="LABEL_W + trackWidth()">
+      <div class="rr-tl-corner" [style.width.px]="LABEL_W">
+        <div class="rr-tl-corner-title">Rollout</div>
+        <div class="rr-tl-corner-sub">Product · Type · Pair</div>
+      </div>
+
+      <div class="rr-days">
+        @for (c of dayColumns(); track c.i) {
+          <div
+            class="rr-day"
+            [class.is-today]="c.isToday"
+            [class.is-we]="c.isWeekend"
+            [class.is-fri]="c.isFriday"
+            [style.width.px]="DAY_W"
+          >
+            <div class="rr-day-wd">{{ c.weekday }}</div>
+            <div class="rr-day-num">{{ c.day }}</div>
+            @if (c.month) {
+              <div class="rr-day-mon">{{ c.month }}</div>
+            }
+            @if (c.isFriday) {
+              <div class="rr-day-flag">Fr-Lock</div>
+            }
+            @if (c.isToday) {
+              <div class="rr-day-today">Today</div>
+            }
+          </div>
+        }
+      </div>
+
+      <div class="rr-tl-body" [style.width.px]="LABEL_W + trackWidth()">
+        <div class="rr-tl-bodylabels" [style.width.px]="LABEL_W">
+          @for (r of rollouts(); track r.id) {
+            <div class="rr-row-label-slot" [style.height.px]="ROW_H">
+              <div class="rr-row-label">
+                <div class="rr-row-label-top">
+                  <span
+                    class="rr-prod-dot"
+                    [style.background]="productColor(r.product)"
+                  ></span>
+                  <span class="rr-row-product">{{ r.product }}</span>
+                  @if (typeMap().get(r.typeId); as t) {
+                    <rr-badge [tone]="t.tone">{{ t.short }}</rr-badge>
+                  }
+                </div>
+                <div class="rr-row-title" (click)="openRollout(r.id)">
+                  {{ r.title }}
+                </div>
+                <div class="rr-row-meta">
+                  <span class="rr-row-actors-text">
+                    {{ (r.pair ?? []).join(' & ') }}
+                  </span>
+                </div>
+              </div>
+            </div>
+          }
+        </div>
+
+        <div class="rr-tl-tracks" [style.width.px]="trackWidth()" [style.height.px]="totalHeight()">
+          <div
+            class="rr-tl-gridlines"
+            [style.width.px]="trackWidth()"
+            [style.backgroundImage]="
+              'repeating-linear-gradient(90deg, rgba(255,255,255,.04) 0, rgba(255,255,255,.04) 1px, transparent 1px, transparent ' +
+              DAY_W +
+              'px)'
+            "
+          ></div>
+
+          <div class="rr-locks-layer" [style.width.px]="trackWidth()" [style.height.px]="totalHeight()">
+            @for (c of dayColumns(); track c.i) {
+              @if (c.isFriday) {
+                <div
+                  class="rr-lock-col rr-lock-fri"
+                  [style.left.px]="c.i * DAY_W"
+                  [style.width.px]="DAY_W"
+                  [style.height.px]="totalHeight()"
+                  title="Friday rule — no rollouts"
+                ></div>
+              }
+            }
+            @for (o of lockOverlays(); track o.lock.id) {
+              <button
+                class="rr-lock-col"
+                [class.rr-lock-manual]="o.lock.kind === 'manual'"
+                [class.rr-lock-holiday]="o.lock.kind === 'holiday'"
+                [style.left.px]="o.left"
+                [style.width.px]="o.width"
+                [style.height.px]="totalHeight()"
+                [title]="o.lock.description"
+              >
+                <span class="rr-lock-label">
+                  <rr-icon [d]="ICONS['lock']" [size]="11" />
+                  {{ o.lock.title }}
+                </span>
+              </button>
+            }
+          </div>
+
+          @if (todayIdx() >= 0 && todayIdx() < days()) {
+            <div
+              class="rr-today-line"
+              [style.left.px]="todayIdx() * DAY_W + DAY_W / 2"
+              [style.height.px]="totalHeight()"
+            ></div>
+          }
+
+          @for (row of timelineRows(); track row.rollout?.id ?? $index; let rowIdx = $index) {
+            <div class="rr-row" [style.height.px]="ROW_H" [style.top.px]="rowIdx * ROW_H">
+              <div class="rr-row-track">
+                @for (p of row.placed; track $index; let i = $index) {
+                  @if (i > 0) {
+                    @if (cascadeStyle(row.placed[i - 1].idx, p.idx, p.meta.color); as cs) {
+                      <div
+                        class="rr-cascade"
+                        [style.left]="cs.left"
+                        [style.width]="cs.width"
+                        [style.top]="cs.top"
+                      >
+                        <span
+                          class="rr-cascade-line"
+                          [style.background]="
+                            'linear-gradient(90deg, ' + cs.color + ' 0%, ' + cs.color + ' 100%)'
+                          "
+                        ></span>
+                        <span class="rr-cascade-arrow" [style.borderLeftColor]="cs.color"></span>
+                      </div>
+                    }
+                  }
+                  <button
+                    class="rr-pill"
+                    [class.is-blocked]="p.stage.status === 'blocked'"
+                    [style.left.px]="pillLeft(p.idx)"
+                    [style.width.px]="pillWidth(stageDurationHours(p.stage))"
+                    [style.top.px]="10"
+                    [style.height.px]="ROW_H - 20"
+                    [style.background]="pillStyle(p.idx, p.meta).background"
+                    [style.borderColor]="pillStyle(p.idx, p.meta).borderColor"
+                    [style.color]="pillStyle(p.idx, p.meta).color"
+                    (click)="openRollout(row.rollout.id)"
+                    [title]="p.meta.label + ' · ' + stageTime(p.stage)"
+                  >
+                    <span class="rr-pill-tag" [style.background]="p.meta.color">{{
+                      p.meta.short
+                    }}</span>
+                    <span class="rr-pill-body">
+                      <span class="rr-pill-time" [style.color]="p.meta.color">{{
+                        stageTime(p.stage)
+                      }}</span>
+                      <span class="rr-pill-meta">
+                        @switch (p.stage.status) {
+                          @case ('done') {
+                            <span class="rr-pill-dot is-done"></span> done
+                          }
+                          @case ('active') {
+                            <span class="rr-pill-dot is-active"></span> in flight
+                          }
+                          @case ('blocked') {
+                            <span class="rr-pill-dot is-blocked"></span> locked
+                          }
+                          @default {
+                            +{{ stageDurationHours(p.stage) }}h window
+                          }
+                        }
+                      </span>
+                    </span>
+                  </button>
+                }
+              </div>
+            </div>
+          }
+
+          @if (rollouts().length === 0) {
+            <div style="padding: 24px; color: var(--muted);">
+              No rollouts yet — admins can create one from the sidebar.
+            </div>
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,72 @@
+{
+  "id": "releaseradar",
+  "realm": "releaseradar",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "accessTokenLifespan": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 28800,
+  "clients": [
+    {
+      "clientId": "releaseradar-backend",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "rr-test-secret",
+      "redirectUris": ["http://localhost:8080/auth/callback"],
+      "webOrigins": ["http://localhost:8080"],
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "",
+        "post.logout.redirect.uris": "http://localhost:8080/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "email",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "email",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "email",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Admin",
+      "credentials": [
+        { "type": "password", "value": "alice-secret", "temporary": false }
+      ]
+    },
+    {
+      "username": "bob",
+      "enabled": true,
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Reader",
+      "credentials": [
+        { "type": "password", "value": "bob-secret", "temporary": false }
+      ]
+    }
+  ]
+}

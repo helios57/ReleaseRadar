@@ -1,0 +1,136 @@
+# ReleaseRadar — full stack (postgres + keycloak + openldap + mock-teams +
+# backend + frontend nginx proxy). Brings every dependency up locally so e2e
+# tests can exercise the real OIDC flow.
+#
+# Public origin is http://localhost:8080 — the nginx in the frontend container
+# proxies /api, /auth, /realms back to the right service.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: releaseradar
+      POSTGRES_PASSWORD: releaseradar
+      POSTGRES_DB: releaseradar
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U releaseradar -d releaseradar"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  openldap:
+    image: osixia/openldap:1.5.0
+    command: ["--copy-service"]
+    environment:
+      LDAP_ORGANISATION: ReleaseRadar
+      LDAP_DOMAIN: example.com
+      LDAP_BASE_DN: dc=example,dc=com
+      LDAP_ADMIN_PASSWORD: adminpassword
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "true"
+    volumes:
+      - ./infra/ldap:/container/service/slapd/assets/config/bootstrap/ldif/custom:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -D 'cn=admin,dc=example,dc=com' -w adminpassword -b 'dc=example,dc=com' '(uid=alice)' dn 2>/dev/null | grep -q 'uid=alice'"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 15s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    command: ["start-dev", "--import-realm", "--http-relative-path=/"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HOSTNAME: http://localhost:8080
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+    volumes:
+      - ./infra/keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The Keycloak image (UBI 9 micro) has no curl/wget. Use bash /dev/tcp
+      # to probe the OIDC discovery endpoint instead — fires 200 OK once the
+      # realm import has finished.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8080 && printf 'GET /realms/releaseradar/.well-known/openid-configuration HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && head -n1 <&3 | grep -q '200 OK'"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+      start_period: 60s
+
+  mock-teams:
+    build:
+      context: ./mock-teams
+    environment:
+      PORT: "4000"
+    ports:
+      - "4000:4000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+    restart: on-failure
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+      openldap:
+        condition: service_healthy
+      mock-teams:
+        condition: service_started
+    # No container-level healthcheck — distroless has no shell / probe binary.
+    # The wait-for-stack script polls /healthz from the host instead.
+    environment:
+      RR_LISTEN_ADDR: ":8080"
+      RR_PUBLIC_URL: "http://localhost:8080"
+      RR_DATABASE_URL: "postgres://releaseradar:releaseradar@postgres:5432/releaseradar?sslmode=disable"
+      RR_SESSION_SECRET: "test-session-secret-do-not-use-in-prod"
+      RR_SEED_ON_START: "true"
+      RR_NOTIFY_TICK: "2s"
+
+      # OIDC — discovery uses internal hostname, issuer claim uses public origin.
+      RR_OIDC_ISSUER: "http://localhost:8080/realms/releaseradar"
+      RR_OIDC_DISCOVERY_URL: "http://keycloak:8080/realms/releaseradar"
+      RR_OIDC_CLIENT_ID: "releaseradar-backend"
+      RR_OIDC_CLIENT_SECRET: "rr-test-secret"
+      RR_OIDC_REDIRECT_URL: "http://localhost:8080/auth/callback"
+      RR_OIDC_SCOPES: "openid,profile,email"
+
+      # LDAP — OpenLDAP requires group-search mode (no memberOf overlay).
+      RR_LDAP_URL: "ldap://openldap:389"
+      RR_LDAP_BIND_DN: "cn=admin,dc=example,dc=com"
+      RR_LDAP_BIND_PASS: "adminpassword"
+      RR_LDAP_BASE_DN: "dc=example,dc=com"
+      RR_LDAP_USER_FILTER: "(mail=%s)"
+      RR_LDAP_GROUP_ATTR: ""
+      RR_LDAP_GROUP_BASE_DN: "ou=groups,dc=example,dc=com"
+      RR_LDAP_GROUP_FILTER: "(&(objectClass=groupOfNames)(member=%s))"
+      # Semicolon-separated DN list (commas are DN-internal).
+      RR_LDAP_ADMIN_GROUPS: "cn=rr-admins,ou=groups,dc=example,dc=com"
+      RR_LDAP_READ_GROUPS: "cn=rr-readers,ou=groups,dc=example,dc=com"
+
+      # Teams webhook routes both channels at the mock service for e2e.
+      RR_TEAMS_WEBHOOK_PROD: "http://mock-teams:4000/webhook/TMS_PROD"
+      RR_TEAMS_WEBHOOK_NONPROD: "http://mock-teams:4000/webhook/TMS_NP"
+
+  frontend:
+    build:
+      context: ./frontend
+    depends_on:
+      - backend
+      - keycloak
+    ports:
+      - "8080:80"
+
+volumes:
+  pgdata:

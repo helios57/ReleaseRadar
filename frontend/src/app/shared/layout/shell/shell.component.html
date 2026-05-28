@@ -1,0 +1,153 @@
+<div class="rr-shell">
+  <aside class="rr-sidebar">
+    <div class="rr-brand">
+      <div class="rr-brand-mark">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="12" cy="12" r="6.5" opacity=".55" />
+          <circle cx="12" cy="12" r="11" opacity=".25" />
+          <path d="M12 1v3M12 20v3M1 12h3M20 12h3" />
+        </svg>
+      </div>
+      <div>
+        <div class="rr-brand-name">ReleaseRadar</div>
+        <div class="rr-brand-sub">tms-platform · prod</div>
+      </div>
+    </div>
+
+    <div class="rr-cta-row">
+      <button
+        class="rr-btn rr-btn-primary"
+        [disabled]="!canEdit()"
+        [title]="canEdit() ? 'Create rollout' : 'Read-only — contact an admin'"
+        (click)="onCreateRollout()"
+      >
+        <rr-icon [d]="ICONS['plus']" [size]="14" /> New rollout
+      </button>
+      <button
+        class="rr-btn rr-btn-ghost"
+        [disabled]="!canEdit()"
+        (click)="onCreateLock()"
+        title="Create lock"
+      >
+        <rr-icon [d]="ICONS['lock']" [size]="14" />
+      </button>
+    </div>
+
+    <nav class="rr-nav">
+      @for (n of nav; track n.id) {
+        <a
+          class="rr-nav-item"
+          routerLinkActive="is-active"
+          [routerLink]="n.link"
+        >
+          <rr-icon [d]="n.icon" [size]="15" />
+          <span>{{ n.label }}</span>
+          @if (n.badge) {
+            <span class="rr-nav-badge">{{ n.badge }}</span>
+          }
+        </a>
+      }
+    </nav>
+
+    @if (products().length) {
+      <div class="rr-side-section">
+        <div class="rr-side-section-title">Filters</div>
+        <div class="rr-chip-list">
+          @for (p of products(); track p.id) {
+            <button class="rr-chip">
+              <span class="rr-chip-dot" [style.background]="productColor(p.id)"></span>
+              {{ p.name }}
+            </button>
+          }
+        </div>
+      </div>
+    }
+
+    <div class="rr-side-section">
+      <div class="rr-side-section-title">Legend</div>
+      <div class="rr-legend">
+        @for (k of stageKeys; track k) {
+          <div class="rr-legend-row">
+            <span
+              class="rr-legend-sq"
+              [style.background]="STAGE[k].soft"
+              [style.borderColor]="STAGE[k].border"
+              [style.color]="STAGE[k].color"
+              >{{ STAGE[k].short }}</span
+            >
+            <span>{{ STAGE[k].label }}</span>
+          </div>
+        }
+        <div class="rr-legend-row">
+          <span class="rr-legend-lock"></span>
+          <span>Rollout-Sperre</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="rr-side-foot">
+      <div class="rr-foot-row">
+        <span class="rr-status-dot"></span> API healthy · 11ms
+      </div>
+      <div class="rr-foot-row rr-foot-muted">v0.1.0 · dev</div>
+    </div>
+  </aside>
+
+  <main class="rr-main">
+    <header class="rr-header">
+      <div class="rr-header-left">
+        <div class="rr-instance">
+          <div class="rr-instance-dot"></div>
+          <div class="rr-instance-meta">
+            <div class="rr-instance-name">tms-platform</div>
+            <div class="rr-instance-env">
+              <span class="rr-mono">prod</span> · ReleaseRadar
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="rr-header-search">
+        <rr-icon [d]="ICONS['search']" [size]="14" />
+        <input placeholder="Search rollouts, brokers, tasks…" />
+        <kbd>⌘K</kbd>
+      </div>
+
+      <div class="rr-header-right">
+        <button class="rr-btn rr-btn-ghost rr-btn-sm">
+          <rr-icon [d]="ICONS['cal']" [size]="13" /> Today
+        </button>
+        <a class="rr-btn rr-btn-ghost rr-btn-sm" href="/api/calendar.ics">
+          <rr-icon [d]="ICONS['download']" [size]="13" /> Export iCal
+        </a>
+        <div class="rr-divider"></div>
+        @if (currentUser(); as u) {
+          <div class="rr-user">
+            <rr-avatar
+              [actor]="{
+                id: u.email,
+                name: u.name,
+                initials: u.initials,
+                hue: 210,
+                role: u.role
+              }"
+              [size]="28"
+              [ring]="true"
+            />
+            <div class="rr-user-meta">
+              <div class="rr-user-name">{{ u.name }}</div>
+              <div class="rr-user-role">
+                <span class="rr-role-pill">{{ u.role }}</span> {{ u.email }}
+              </div>
+            </div>
+          </div>
+        } @else {
+          <a class="rr-btn rr-btn-ghost rr-btn-sm" href="/auth/login">Sign in</a>
+        }
+      </div>
+    </header>
+
+    <router-outlet />
+  </main>
+</div>
