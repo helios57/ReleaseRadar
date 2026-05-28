@@ -38,7 +38,9 @@ echo "    watchdog pid=$WATCHDOG_PID"
 
 echo "==> installing playwright dependencies"
 ( cd e2e && npm install --no-audit --no-fund )
-( cd e2e && npx playwright install --with-deps chromium )
+# --with-deps would install system packages via apt; require them to already
+# be installed (CI images / dev machines handle this once).
+( cd e2e && npx playwright install chromium )
 
 echo "==> running e2e suite"
 ( cd e2e && npm test )
