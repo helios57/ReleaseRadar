@@ -14,6 +14,7 @@ import { ApiService } from '../../core/api/api.service';
 import { DialogStore } from '../../core/dialog.store';
 import { RefreshBus } from '../../core/refresh.bus';
 import { cascadeStages, formatDelay, getStage } from '../../core/stage';
+import { scheduleWarnings } from '../../core/schedule-rules';
 import { Product, RolloutType } from '../../core/models/rollout.models';
 import { IconComponent, ICONS } from '../../shared/ui/icon.component';
 
@@ -98,6 +99,24 @@ import { IconComponent, ICONS } from '../../shared/ui/icon.component';
               />
             </label>
           </div>
+
+          @if (scheduleAdvisories().length) {
+            <div
+              class="rr-banner"
+              style="border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.10);"
+              data-test="schedule-warning"
+            >
+              <rr-icon [d]="ICONS['warn']" [size]="16" />
+              <div>
+                <strong>Scheduling-Regel beachten.</strong>
+                <p>
+                  @for (a of scheduleAdvisories(); track $index) {
+                    <span>{{ a }}<br /></span>
+                  }
+                </p>
+              </div>
+            </div>
+          }
 
           @if (selectedType(); as type) {
             <div class="rr-hint">
@@ -272,6 +291,18 @@ export class CreateRolloutModalComponent {
       this.title().trim().length > 0 &&
       !this.submitting(),
   );
+
+  // Non-blocking advisories: no rollouts on Fridays or before Bernese holidays.
+  protected readonly scheduleAdvisories = computed(() => {
+    const out: string[] = [];
+    for (const s of this.preview()) {
+      const d = new Date(s.startAt);
+      for (const w of scheduleWarnings(d)) {
+        out.push(`${getStage(s.env).label}: ${w}`);
+      }
+    }
+    return out;
+  });
 
   constructor() {
     effect(() => {

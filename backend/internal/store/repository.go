@@ -347,6 +347,85 @@ func (r *Repository) CreateRollout(ctx context.Context, in domain.Rollout) (doma
 	return r.Rollout(ctx, in.ID)
 }
 
+// UpdateRollout replaces the editable fields of a rollout: title, descriptions,
+// risks, stages, pair, and the per-rollout task list (which may be freely
+// CRUD'd relative to the inherited defaults). Returns ErrNotFound if absent.
+func (r *Repository) UpdateRollout(ctx context.Context, in domain.Rollout) (domain.Rollout, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return in, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `
+		UPDATE rollouts
+		   SET title = $2, desc_ext = $3, desc_int = $4, risks = $5, updated_at = now()
+		 WHERE id = $1
+	`, in.ID, in.Title, in.DescExt, in.DescInt, in.Risks)
+	if err != nil {
+		return in, err
+	}
+	if tag.RowsAffected() == 0 {
+		return in, ErrNotFound
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM rollout_stages WHERE rollout_id = $1`, in.ID); err != nil {
+		return in, err
+	}
+	for i, s := range in.Stages {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO rollout_stages (rollout_id, seq, env, start_at, duration, status)
+			VALUES ($1,$2,$3,$4,$5,$6)
+		`, in.ID, i, s.Env, s.StartAt, s.Duration, string(s.Status)); err != nil {
+			return in, err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM rollout_actors WHERE rollout_id = $1`, in.ID); err != nil {
+		return in, err
+	}
+	for _, actorID := range in.Pair {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO rollout_actors (rollout_id, actor_id) VALUES ($1,$2) ON CONFLICT DO NOTHING
+		`, in.ID, actorID); err != nil {
+			return in, err
+		}
+	}
+
+	if _, err := tx.Exec(ctx, `DELETE FROM rollout_tasks WHERE rollout_id = $1`, in.ID); err != nil {
+		return in, err
+	}
+	for i, t := range in.Tasks {
+		status := t.Status
+		if status != "" && status != "done" && status != "failed" {
+			status = ""
+		}
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO rollout_tasks (rollout_id, seq, description, status, reason, completed_by, completed_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`, in.ID, i, t.Description, status, t.Reason, nullIfEmpty(t.By), t.At); err != nil {
+			return in, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return in, err
+	}
+	return r.Rollout(ctx, in.ID)
+}
+
+// DeleteRollout removes a rollout; child rows cascade via FK constraints.
+func (r *Repository) DeleteRollout(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM rollouts WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *Repository) UpdateRolloutTask(ctx context.Context, rolloutID string, seq int, status, reason, by string) error {
 	if _, err := r.pool.Exec(ctx, `
 		UPDATE rollout_tasks SET status=$3, reason=$4, completed_by=$5, completed_at=now()
@@ -386,6 +465,32 @@ func (r *Repository) CreateLock(ctx context.Context, l domain.Lock) (domain.Lock
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 	`, l.ID, l.Title, l.Description, l.Contact, l.StartAt, l.EndAt, l.Products, l.Kind, nullIfEmpty(l.CreatedBy))
 	return l, err
+}
+
+func (r *Repository) UpdateLock(ctx context.Context, l domain.Lock) (domain.Lock, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE locks
+		   SET title = $2, description = $3, contact = $4, start_at = $5, end_at = $6, products = $7, kind = $8
+		 WHERE id = $1
+	`, l.ID, l.Title, l.Description, l.Contact, l.StartAt, l.EndAt, l.Products, l.Kind)
+	if err != nil {
+		return l, err
+	}
+	if tag.RowsAffected() == 0 {
+		return l, ErrNotFound
+	}
+	return l, nil
+}
+
+func (r *Repository) DeleteLock(ctx context.Context, id string) error {
+	tag, err := r.pool.Exec(ctx, `DELETE FROM locks WHERE id = $1`, id)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // ---------- Notifications ----------

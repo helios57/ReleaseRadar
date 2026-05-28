@@ -48,6 +48,7 @@ export class ShellComponent {
     { id: 'list', label: 'Rollouts', icon: ICONS['rollout'], link: '/list' },
     { id: 'locks', label: 'Locks', icon: ICONS['lock'], link: '/locks' },
     { id: 'data', label: 'Master Data', icon: ICONS['data'], link: '/data' },
+    { id: 'contacts', label: 'Contacts', icon: ICONS['people'], link: '/contacts' },
     { id: 'docs', label: 'API & MCP', icon: ICONS['code'], link: '/docs' },
   ];
 

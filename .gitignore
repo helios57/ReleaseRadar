@@ -28,3 +28,6 @@
 
 # Playwright MCP browser artifacts
 .playwright-mcp/
+
+# Stray Playwright output if run from repo root
+test-results/

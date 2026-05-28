@@ -20,7 +20,7 @@ type LockKind = 'manual' | 'holiday' | 'window';
       <div class="rr-modal rr-modal-sm" (click)="$event.stopPropagation()" data-test="create-lock-modal">
         <header class="rr-modal-head">
           <div>
-            <h2>Create rollout lock (Sperre)</h2>
+            <h2>{{ editId() ? 'Edit' : 'Create' }} rollout lock (Sperre)</h2>
             <p class="rr-modal-sub">Blocked time range — no rollouts should be scheduled or executed.</p>
           </div>
           <button class="rr-icon-btn" (click)="close()" aria-label="Close">
@@ -126,7 +126,7 @@ type LockKind = 'manual' | 'holiday' | 'window';
               [disabled]="!canSubmit()"
               (click)="submit()"
             >
-              {{ submitting() ? 'Creating…' : 'Create lock' }}
+              {{ submitting() ? 'Saving…' : editId() ? 'Save lock' : 'Create lock' }}
             </button>
           </div>
         </footer>
@@ -152,13 +152,17 @@ export class CreateLockModalComponent {
     { initialValue: [] as Product[] },
   );
 
-  protected readonly kind = signal<LockKind>('manual');
-  protected readonly start = signal(defaultStart());
-  protected readonly end = signal(defaultEnd());
-  protected readonly title = signal('');
-  protected readonly description = signal('');
-  protected readonly contact = signal('');
-  protected readonly products = signal<string[]>(['all']);
+  private readonly existing = this.dialog.lockEdit();
+  protected readonly editId = signal<string | null>(this.existing?.id ?? null);
+  protected readonly kind = signal<LockKind>((this.existing?.kind as LockKind) ?? 'manual');
+  protected readonly start = signal(
+    this.existing ? toLocalInput(this.existing.startAt) : defaultStart(),
+  );
+  protected readonly end = signal(this.existing ? toLocalInput(this.existing.endAt) : defaultEnd());
+  protected readonly title = signal(this.existing?.title ?? '');
+  protected readonly description = signal(this.existing?.description ?? '');
+  protected readonly contact = signal(this.existing?.contact ?? '');
+  protected readonly products = signal<string[]>(this.existing?.products ?? ['all']);
   protected readonly submitting = signal(false);
   protected readonly error = signal<string | null>(null);
 
@@ -185,26 +189,27 @@ export class CreateLockModalComponent {
     if (!this.canSubmit()) return;
     this.submitting.set(true);
     this.error.set(null);
-    this.api
-      .createLock({
-        title: this.title().trim(),
-        description: this.description(),
-        contact: this.contact(),
-        startAt: new Date(this.start()).toISOString(),
-        endAt: new Date(this.end()).toISOString(),
-        products: this.products(),
-        kind: this.kind(),
-      })
-      .subscribe({
-        next: () => {
-          this.bus.bump();
-          this.dialog.close();
-        },
-        error: (e) => {
-          this.submitting.set(false);
-          this.error.set(extractError(e));
-        },
-      });
+    const body = {
+      title: this.title().trim(),
+      description: this.description(),
+      contact: this.contact(),
+      startAt: new Date(this.start()).toISOString(),
+      endAt: new Date(this.end()).toISOString(),
+      products: this.products(),
+      kind: this.kind(),
+    };
+    const id = this.editId();
+    const req = id ? this.api.updateLock(id, body) : this.api.createLock(body);
+    req.subscribe({
+      next: () => {
+        this.bus.bump();
+        this.dialog.close();
+      },
+      error: (e) => {
+        this.submitting.set(false);
+        this.error.set(extractError(e));
+      },
+    });
   }
 
   protected close(): void {
@@ -219,6 +224,9 @@ function localInput(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
     d.getHours(),
   )}:${pad(d.getMinutes())}`;
+}
+function toLocalInput(iso: string): string {
+  return localInput(new Date(iso));
 }
 function defaultStart(): string {
   const d = new Date();

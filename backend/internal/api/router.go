@@ -44,8 +44,12 @@ func NewRouter(d Deps) http.Handler {
 	mux.Handle("POST /api/rollout-types", middleware.RequireAdmin(http.HandlerFunc(h.upsertRolloutType)))
 	mux.Handle("POST /api/products", middleware.RequireAdmin(http.HandlerFunc(h.upsertProduct)))
 	mux.Handle("POST /api/rollouts", middleware.RequireAdmin(http.HandlerFunc(h.createRollout)))
+	mux.Handle("PATCH /api/rollouts/{id}", middleware.RequireAdmin(http.HandlerFunc(h.updateRollout)))
+	mux.Handle("DELETE /api/rollouts/{id}", middleware.RequireAdmin(http.HandlerFunc(h.deleteRollout)))
 	mux.Handle("PATCH /api/rollouts/{id}/tasks/{seq}", middleware.RequireAdmin(http.HandlerFunc(h.updateTask)))
 	mux.Handle("POST /api/locks", middleware.RequireAdmin(http.HandlerFunc(h.createLock)))
+	mux.Handle("PATCH /api/locks/{id}", middleware.RequireAdmin(http.HandlerFunc(h.updateLock)))
+	mux.Handle("DELETE /api/locks/{id}", middleware.RequireAdmin(http.HandlerFunc(h.deleteLock)))
 
 	// Health.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {

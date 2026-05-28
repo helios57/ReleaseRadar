@@ -208,6 +208,37 @@ func (h *handlers) createRollout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, out)
 }
 
+func (h *handlers) updateRollout(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in domain.Rollout
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	in.ID = id
+	out, err := h.Repo.UpdateRollout(r.Context(), in)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	// Stages may have shifted — (re)schedule advance-warning notifications.
+	h.scheduleNotifications(r, out)
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *handlers) deleteRollout(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := h.Repo.DeleteRollout(r.Context(), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (h *handlers) updateTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	seq, err := strconv.Atoi(r.PathValue("seq"))
@@ -259,6 +290,35 @@ func (h *handlers) createLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, out)
+}
+
+func (h *handlers) updateLock(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var in domain.Lock
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	in.ID = id
+	out, err := h.Repo.UpdateLock(r.Context(), in)
+	if errors.Is(err, store.ErrNotFound) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *handlers) deleteLock(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if err := h.Repo.DeleteLock(r.Context(), id); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // ---------- iCalendar ----------

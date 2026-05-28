@@ -36,6 +36,13 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'contacts',
+        loadComponent: () =>
+          import('./features/contacts/contacts-view.component').then(
+            (m) => m.ContactsViewComponent,
+          ),
+      },
+      {
         path: 'docs',
         loadComponent: () =>
           import('./features/docs/docs-view/docs-view.component').then(

@@ -1,5 +1,25 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import { ADMIN, READONLY } from '../helpers/auth';
+
+async function createApiRollout(
+  request: APIRequestContext,
+  prefix: string,
+  startAtISO?: string,
+) {
+  const startAt = startAtISO ?? new Date(Date.now() + 3_600_000).toISOString();
+  const res = await request.post('/api/rollouts', {
+    data: {
+      product: 'operator',
+      typeId: 'operator-feature',
+      title: `${prefix} ${Date.now()}`,
+      descExt: 'x',
+      stages: [{ env: 'non-prod', startAt, durationNs: 3_600_000_000_000, status: 'scheduled' }],
+      pair: [],
+    },
+  });
+  expect(res.status()).toBe(201);
+  return res.json();
+}
 
 test.describe('UI — admin create + execute flows', () => {
   test.use({ storageState: ADMIN.storagePath });
@@ -110,6 +130,106 @@ test.describe('UI — admin create + execute flows', () => {
     await expect(page.locator('.rr-list-table')).toBeVisible();
     await page.getByRole('button', { name: /Scheduled/ }).click();
     await expect(page.locator('.rr-list-table')).toBeVisible();
+  });
+
+  test('edit a rollout (description + add task) through the detail page', async ({ page, request }) => {
+    const created = await createApiRollout(request, 'ui-edit');
+    await page.goto(`/#/rollout/${created.id}`);
+    await page.locator('[data-test="edit-rollout"]').click();
+    await page.locator('[data-test="edit-descext"]').fill('rewritten external description');
+    await page.locator('[data-test="new-task"]').fill('ui added task');
+    await page.locator('[data-test="add-task"]').click();
+    await page.locator('[data-test="save-rollout"]').click();
+
+    await expect(page.locator('[data-test="detail-descext"]')).toContainText(
+      'rewritten external description',
+      { timeout: 10_000 },
+    );
+    await expect(page.locator('.rr-task-label', { hasText: 'ui added task' })).toBeVisible();
+  });
+
+  test('delete a rollout through the detail page', async ({ page, request }) => {
+    const created = await createApiRollout(request, 'ui-delete');
+    await page.goto(`/#/rollout/${created.id}`);
+    await page.locator('[data-test="delete-rollout"]').click();
+    await page.locator('[data-test="confirm-delete"]').click();
+    // Detail page unmounts (router navigates to the timeline) and the API 404s.
+    await expect(page.locator('[data-test="rollout-detail"]')).toHaveCount(0, { timeout: 10_000 });
+    const get = await request.get(`/api/rollouts/${created.id}`);
+    expect(get.status()).toBe(404);
+  });
+
+  test('edit then delete a lock from the locks view', async ({ page, request }) => {
+    const now = new Date();
+    const created = await (
+      await request.post('/api/locks', {
+        data: {
+          title: `ui-lock-edit ${Date.now()}`,
+          startAt: now.toISOString(),
+          endAt: new Date(now.getTime() + 86400000).toISOString(),
+          products: ['all'],
+          kind: 'manual',
+        },
+      })
+    ).json();
+
+    await page.goto('/#/locks');
+    await page.locator(`[data-test="lock-edit-${created.id}"]`).click();
+    const newTitle = `ui-lock-renamed ${Date.now()}`;
+    await page.locator('[data-test="lock-title"]').fill(newTitle);
+    await page.locator('[data-test="lock-submit"]').click();
+    await expect(page.getByText(newTitle)).toBeVisible({ timeout: 10_000 });
+
+    await page.locator(`[data-test="lock-delete-${created.id}"]`).click();
+    await expect(page.locator(`[data-test="lock-${created.id}"]`)).toHaveCount(0, { timeout: 10_000 });
+  });
+
+  test('contacts overview lists owner, brokers and SNOW requirement', async ({ page }) => {
+    await page.goto('/#/contacts');
+    await expect(page.locator('[data-test="contacts-view"]')).toBeVisible();
+    const operatorRow = page.locator('[data-test="contact-operator"]');
+    await expect(operatorRow).toBeVisible();
+    await expect(operatorRow.locator('[data-test="contact-owner"]')).not.toBeEmpty();
+    // micro services = no prod impact; operator = SNOW required.
+    await expect(operatorRow).toContainText('SNOW change required');
+  });
+
+  test('create modal warns on Friday / Bernese-holiday scheduling', async ({ page }) => {
+    await page.goto('/');
+    await page.getByRole('button', { name: /New rollout/ }).first().click();
+    const modal = page.locator('[data-test="create-rollout-modal"]');
+    await modal.locator('[data-test="rollout-type"]').selectOption('operator-feature');
+
+    // A clean mid-week date → no advisory.
+    await modal.locator('input[type="date"]').fill('2026-06-03');
+    await expect(modal.locator('[data-test="schedule-warning"]')).toHaveCount(0);
+
+    // A Friday → advisory appears (rule: no rollouts on Fridays).
+    await modal.locator('input[type="date"]').fill('2026-06-05');
+    await expect(modal.locator('[data-test="schedule-warning"]')).toBeVisible();
+  });
+
+  test('rollout detail shows a lock-active warning when a stage is in a lock window', async ({
+    page,
+    request,
+  }) => {
+    const startAt = new Date(Date.now() + 60 * 60 * 1000); // +1h
+    const lockStart = new Date(Date.now() - 60 * 60 * 1000); // -1h
+    const lockEnd = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // +2d
+    await request.post('/api/locks', {
+      data: {
+        title: `ui-blocking-lock ${Date.now()}`,
+        description: 'master bug — do not deploy',
+        startAt: lockStart.toISOString(),
+        endAt: lockEnd.toISOString(),
+        products: ['all'],
+        kind: 'manual',
+      },
+    });
+    const created = await createApiRollout(request, 'ui-locked', startAt.toISOString());
+
+    await page.goto(`/#/rollout/${created.id}`);
+    await expect(page.locator('[data-test="lock-banner"]')).toBeVisible({ timeout: 10_000 });
   });
 });
 

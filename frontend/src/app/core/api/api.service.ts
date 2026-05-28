@@ -41,6 +41,14 @@ export class ApiService {
     return this.http.post<Rollout>(`${API}/rollouts`, body);
   }
 
+  updateRollout(id: string, body: Partial<Rollout>): Observable<Rollout> {
+    return this.http.patch<Rollout>(`${API}/rollouts/${id}`, body);
+  }
+
+  deleteRollout(id: string): Observable<void> {
+    return this.http.delete<void>(`${API}/rollouts/${id}`);
+  }
+
   updateTask(
     id: string,
     seq: number,
@@ -55,5 +63,13 @@ export class ApiService {
 
   createLock(body: Partial<Lock>): Observable<Lock> {
     return this.http.post<Lock>(`${API}/locks`, body);
+  }
+
+  updateLock(id: string, body: Partial<Lock>): Observable<Lock> {
+    return this.http.patch<Lock>(`${API}/locks/${id}`, body);
+  }
+
+  deleteLock(id: string): Observable<void> {
+    return this.http.delete<void>(`${API}/locks/${id}`);
   }
 }

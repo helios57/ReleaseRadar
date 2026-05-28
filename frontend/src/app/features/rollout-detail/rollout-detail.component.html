@@ -1,0 +1,402 @@
+@if (rollout(); as r) {
+  <div class="rr-detail-page" data-test="rollout-detail">
+    <header class="rr-detail-head">
+      <div class="rr-drawer-head-l">
+        <button class="rr-detail-back" (click)="back()">
+          <rr-icon [d]="ICONS['chev']" [size]="12" class="rr-rot-180" /> Back to timeline
+        </button>
+        <div class="rr-drawer-eyebrow">
+          <span class="rr-prod-dot" [style.background]="prodColor(r.product)"></span>
+          <span>{{ r.product }}</span>
+          <span class="rr-sep">/</span>
+          @if (type(); as t) {
+            <rr-badge [tone]="t.tone">{{ t.short }}</rr-badge>
+          }
+          <span class="rr-sep">/</span>
+          <span class="rr-mono rr-muted">{{ r.id }}</span>
+        </div>
+        <h2 class="rr-drawer-title">{{ r.title }}</h2>
+      </div>
+      <div class="rr-drawer-head-r">
+        <a class="rr-btn rr-btn-ghost rr-btn-sm" href="/api/calendar.ics">
+          <rr-icon [d]="ICONS['download']" [size]="13" /> .ics
+        </a>
+        @if (canEdit()) {
+          @if (!editing()) {
+            <button class="rr-btn rr-btn-ghost rr-btn-sm" data-test="edit-rollout" (click)="enterEdit()">
+              <rr-icon [d]="ICONS['code']" [size]="13" /> Edit
+            </button>
+            <button
+              class="rr-btn rr-btn-ghost rr-btn-sm rr-btn-danger-ghost"
+              data-test="delete-rollout"
+              (click)="requestDelete()"
+            >
+              <rr-icon [d]="ICONS['x']" [size]="13" /> Delete
+            </button>
+          } @else {
+            <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="cancelEdit()">Cancel</button>
+            <button
+              class="rr-btn rr-btn-primary rr-btn-sm"
+              data-test="save-rollout"
+              [disabled]="busy()"
+              (click)="save()"
+            >
+              {{ busy() ? 'Saving…' : 'Save changes' }}
+            </button>
+          }
+        }
+      </div>
+    </header>
+
+    @if (blockingLocks().length) {
+      <div class="rr-banner rr-banner-danger" data-test="lock-banner">
+        <rr-icon [d]="ICONS['warn']" [size]="18" />
+        <div>
+          <strong>Lock Active — Do not deploy.</strong>
+          <p>{{ lockTitles() }}</p>
+        </div>
+      </div>
+    }
+
+    @if (scheduleAdvisories().length) {
+      <div
+        class="rr-banner"
+        style="border-color: rgba(245,158,11,.4); background: rgba(245,158,11,.10);"
+        data-test="schedule-warning"
+      >
+        <rr-icon [d]="ICONS['warn']" [size]="16" />
+        <div>
+          <strong>Scheduling-Regel beachten.</strong>
+          <p>
+            @for (a of scheduleAdvisories(); track $index) {
+              <span>{{ a }}<br /></span>
+            }
+          </p>
+        </div>
+      </div>
+    }
+
+    <div class="rr-drawer-grid">
+      <div class="rr-drawer-col">
+        <section class="rr-block">
+          <div class="rr-block-head"><h3>Cascade</h3></div>
+          <div class="rr-stage-cards">
+            @for (st of r.stages; track $index; let i = $index) {
+              @if (i > 0) {
+                <div class="rr-stage-arrow">
+                  <span>+{{ stageGap(r.stages, i) }}</span>
+                  <rr-icon d="M5 12h14m0 0l-4-4m4 4l-4 4" [size]="14" />
+                </div>
+              }
+              <div
+                class="rr-stage-card"
+                [style.borderColor]="meta(st.env).border"
+                [style.background]="meta(st.env).soft"
+              >
+                <div class="rr-stage-card-top">
+                  <span
+                    class="rr-stage-card-tag"
+                    [style.background]="meta(st.env).color"
+                    style="color:#0a0a0c"
+                    >{{ meta(st.env).short }}</span
+                  >
+                  <span [style.color]="meta(st.env).color" style="font-weight:600">
+                    {{ meta(st.env).label }}
+                  </span>
+                </div>
+                <div class="rr-stage-card-date">
+                  {{ fmtDate(st.startAt) }}<span> · {{ fmtTime(st.startAt) }}</span>
+                </div>
+                <div class="rr-stage-card-status">
+                  <span class="rr-pill-dot" [class]="'is-' + st.status"></span>
+                  {{ st.status }} · ~{{ hours(st.durationNs) }}h
+                </div>
+              </div>
+            }
+          </div>
+        </section>
+
+        <section class="rr-block">
+          <div class="rr-block-head">
+            <h3>
+              Tasks
+              @if (type(); as t) {
+                <span class="rr-muted">(inherited from {{ t.short }})</span>
+              }
+            </h3>
+            @if (!editing()) {
+              <div class="rr-progress-wrap">
+                <div class="rr-progress">
+                  <div class="rr-progress-fill" [style.width]="completion() + '%'"></div>
+                  @if (failedCount() > 0) {
+                    <div class="rr-progress-fail" [style.width]="failedPct() + '%'"></div>
+                  }
+                </div>
+                <span class="rr-mono">{{ completion() }}%</span>
+                @if (failedCount() > 0) {
+                  <span class="rr-mono rr-fail-count">· {{ failedCount() }} failed</span>
+                }
+              </div>
+            }
+          </div>
+
+          @if (editing() && draft(); as d) {
+            <!-- Configure tasks (CRUD) -->
+            <ol class="rr-md-tasks" data-test="task-editor">
+              @for (t of d.tasks; track $index; let i = $index) {
+                <li class="rr-md-task">
+                  <span class="rr-md-task-no rr-mono">{{ i + 1 }}</span>
+                  <input [value]="t.description" (input)="editDraftTask(i, $any($event.target).value)" />
+                  <div class="rr-md-task-tools">
+                    <button class="rr-icon-btn" (click)="moveDraftTask(i, -1)" title="Move up">
+                      <rr-icon [d]="ICONS['chev']" [size]="12" class="rr-rot-270" />
+                    </button>
+                    <button class="rr-icon-btn" (click)="moveDraftTask(i, 1)" title="Move down">
+                      <rr-icon [d]="ICONS['chev']" [size]="12" class="rr-rot-90" />
+                    </button>
+                    <button class="rr-icon-btn rr-md-row-x" (click)="removeDraftTask(i)" title="Remove">
+                      <rr-icon [d]="ICONS['x']" [size]="12" />
+                    </button>
+                  </div>
+                </li>
+              }
+            </ol>
+            <div class="rr-md-row-add">
+              <input
+                data-test="new-task"
+                placeholder="Add a task…"
+                [value]="newTaskDraft()"
+                (input)="newTaskDraft.set($any($event.target).value)"
+                (keydown.enter)="addDraftTask()"
+              />
+              <button class="rr-btn rr-btn-ghost rr-btn-sm" data-test="add-task" (click)="addDraftTask()">
+                <rr-icon [d]="ICONS['plus']" [size]="11" /> Add task
+              </button>
+            </div>
+          } @else {
+            <!-- Execute checklist -->
+            <ul class="rr-tasks">
+              @for (t of r.tasks; track t.index) {
+                <li
+                  class="rr-task"
+                  [class.is-done]="t.status === 'done'"
+                  [class.is-failed]="t.status === 'failed'"
+                  [class.is-failing]="failingIndex() === t.index"
+                  [attr.data-test]="'task-' + t.index"
+                >
+                  <div class="rr-task-main">
+                    <div class="rr-task-checks">
+                      <button
+                        class="rr-check rr-check-ok"
+                        [class.is-on]="t.status === 'done'"
+                        [disabled]="!canEdit() || busy()"
+                        (click)="toggleDone(r.id, t)"
+                        [attr.aria-pressed]="t.status === 'done'"
+                        title="Mark done"
+                        [attr.data-test]="'task-done-' + t.index"
+                      >
+                        @if (t.status === 'done') {
+                          <rr-icon [d]="ICONS['check']" [size]="11" />
+                        }
+                      </button>
+                      <button
+                        class="rr-check rr-check-fail"
+                        [class.is-on]="t.status === 'failed'"
+                        [disabled]="!canEdit() || busy()"
+                        (click)="onFail(r.id, t)"
+                        [attr.aria-pressed]="t.status === 'failed'"
+                        title="Mark failed"
+                      >
+                        @if (t.status === 'failed') {
+                          <rr-icon [d]="ICONS['x']" [size]="11" />
+                        }
+                      </button>
+                    </div>
+                    <span class="rr-task-label">{{ t.description }}</span>
+                    @if (t.status === 'done' && t.by) {
+                      <span class="rr-task-log"><span>checked by {{ t.by }}</span></span>
+                    } @else if (t.status === 'failed' && failingIndex() !== t.index) {
+                      <span class="rr-task-log"><span>failed{{ t.by ? ' · ' + t.by : '' }}</span></span>
+                    } @else if (t.status === '') {
+                      <span class="rr-task-pending">pending</span>
+                    }
+                  </div>
+
+                  @if (t.status === 'failed' && failingIndex() !== t.index && t.reason) {
+                    <div class="rr-task-reason">
+                      <rr-icon [d]="ICONS['warn']" [size]="11" />
+                      <span class="rr-task-reason-text">{{ t.reason }}</span>
+                      @if (canEdit()) {
+                        <button class="rr-task-reason-edit" (click)="editReason(t)">edit</button>
+                      }
+                    </div>
+                  }
+
+                  @if (failingIndex() === t.index) {
+                    <div class="rr-task-reason-form">
+                      <label class="rr-field">
+                        <span>Why did this step fail? <em>(required — logged on the rollout)</em></span>
+                        <textarea
+                          rows="2"
+                          data-test="fail-reason"
+                          [value]="reasonDraft()"
+                          (input)="reasonDraft.set($any($event.target).value)"
+                        ></textarea>
+                      </label>
+                      <div class="rr-task-reason-actions">
+                        <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="cancelFail()">Cancel</button>
+                        <button
+                          class="rr-btn rr-btn-danger rr-btn-sm"
+                          data-test="fail-save"
+                          [disabled]="!reasonDraft().trim() || busy()"
+                          (click)="saveFailure(r.id, t)"
+                        >
+                          Save failure
+                        </button>
+                      </div>
+                    </div>
+                  }
+                </li>
+              } @empty {
+                <li class="rr-muted" style="padding:10px 4px">No tasks on this rollout.</li>
+              }
+            </ul>
+          }
+        </section>
+
+        <section class="rr-block">
+          <div class="rr-block-head"><h3>Descriptions &amp; Risks</h3></div>
+          @if (editing() && draft(); as d) {
+            <div class="rr-fields">
+              <label class="rr-field">
+                <span>Title</span>
+                <input data-test="edit-title" [value]="d.title" (input)="patchDraft({ title: $any($event.target).value })" />
+              </label>
+              <label class="rr-field">
+                <span>External description <em>(customer-visible)</em></span>
+                <textarea
+                  rows="2"
+                  data-test="edit-descext"
+                  [value]="d.descExt"
+                  (input)="patchDraft({ descExt: $any($event.target).value })"
+                ></textarea>
+              </label>
+              <label class="rr-field">
+                <span>Internal description</span>
+                <textarea
+                  rows="2"
+                  [value]="d.descInt"
+                  (input)="patchDraft({ descInt: $any($event.target).value })"
+                ></textarea>
+              </label>
+              <label class="rr-field">
+                <span>Risks</span>
+                <textarea
+                  rows="2"
+                  data-test="edit-risks"
+                  [value]="d.risks"
+                  (input)="patchDraft({ risks: $any($event.target).value })"
+                ></textarea>
+              </label>
+            </div>
+          } @else {
+            <div class="rr-fields">
+              <div class="rr-field">
+                <span>External description <em>(customer-visible)</em></span>
+                <p data-test="detail-descext">{{ r.descExt || '—' }}</p>
+              </div>
+              @if (isAdmin()) {
+                <div class="rr-field">
+                  <span>Internal description</span>
+                  <p data-test="detail-descint">{{ r.descInt || '—' }}</p>
+                </div>
+                <div class="rr-field">
+                  <span>Risks</span>
+                  <p>{{ r.risks || '—' }}</p>
+                </div>
+              } @else {
+                <div class="rr-field rr-muted">
+                  Internal description &amp; risks are restricted to administrators.
+                </div>
+              }
+            </div>
+          }
+        </section>
+      </div>
+
+      <div class="rr-drawer-col rr-drawer-col-right">
+        <section class="rr-block">
+          <div class="rr-block-head"><h3>Executed by (pair)</h3></div>
+          @if (editing() && draft()) {
+            <label class="rr-field">
+              <span>Pair <em>(comma-separated)</em></span>
+              <input
+                data-test="edit-pair"
+                placeholder="e.g. luc, henning"
+                [value]="pairText()"
+                (input)="setPair($any($event.target).value)"
+              />
+            </label>
+          } @else {
+            <div class="rr-pair">
+              @for (id of r.pair; track id) {
+                <div class="rr-pair-card">
+                  <div>
+                    <div class="rr-pair-name">{{ id }}</div>
+                    <div class="rr-pair-role"><span class="rr-role-pill">admin</span> · oAuth verified</div>
+                  </div>
+                </div>
+              } @empty {
+                <div class="rr-muted">No pair assigned.</div>
+              }
+            </div>
+          }
+        </section>
+
+        @if (type(); as t) {
+          @if (t.rules.length) {
+            <section class="rr-block">
+              <div class="rr-block-head"><h3>RolloutType rules</h3></div>
+              <ul class="rr-rules">
+                @for (rule of t.rules; track $index) {
+                  <li><rr-icon [d]="ICONS['check']" [size]="12" /> {{ rule }}</li>
+                }
+              </ul>
+            </section>
+          }
+        }
+      </div>
+    </div>
+
+    @if (confirmingDelete()) {
+      <div class="rr-modal-scrim" (click)="cancelDelete()">
+        <div class="rr-modal rr-modal-sm" (click)="$event.stopPropagation()" data-test="delete-confirm">
+          <header class="rr-modal-head">
+            <div>
+              <h2>Delete rollout</h2>
+              <p class="rr-modal-sub">This permanently removes <strong>{{ r.title }}</strong> and its tasks.</p>
+            </div>
+          </header>
+          <footer class="rr-modal-foot">
+            <span class="rr-muted">This cannot be undone.</span>
+            <div class="rr-modal-foot-actions">
+              <button class="rr-btn rr-btn-ghost" (click)="cancelDelete()">Cancel</button>
+              <button
+                class="rr-btn rr-btn-danger"
+                data-test="confirm-delete"
+                [disabled]="busy()"
+                (click)="confirmDelete(r.id)"
+              >
+                {{ busy() ? 'Deleting…' : 'Delete rollout' }}
+              </button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    }
+  </div>
+} @else {
+  <div style="padding: 16px 18px;" class="rr-muted" data-test="rollout-detail-loading">
+    Loading rollout…
+  </div>
+}

@@ -10,14 +10,17 @@ import { ChangeDetectionStrategy, Component } from '@angular/core';
         <span class="rr-month-range">Public reference</span>
       </div>
       <ul>
-        <li><code>GET /api/products</code></li>
-        <li><code>GET /api/rollout-types</code></li>
-        <li><code>GET /api/rollouts</code></li>
-        <li><code>POST /api/rollouts</code> (admin only)</li>
-        <li><code>GET /api/locks</code></li>
-        <li><code>POST /api/locks</code> (admin only)</li>
-        <li><code>GET /api/calendar.ics</code> — subscribe in Outlook</li>
-        <li><code>GET /auth/login</code> — start Microsoft SSO</li>
+        <li><code>GET /api/me</code></li>
+        <li><code>GET /api/products</code> · <code>POST /api/products</code> (admin)</li>
+        <li><code>GET /api/rollout-types</code> · <code>POST /api/rollout-types</code> (admin)</li>
+        <li><code>GET /api/rollouts</code> · <code>GET /api/rollouts/:id</code></li>
+        <li><code>POST /api/rollouts</code> (admin)</li>
+        <li><code>PATCH /api/rollouts/:id</code> · <code>DELETE /api/rollouts/:id</code> (admin)</li>
+        <li><code>PATCH /api/rollouts/:id/tasks/:seq</code> (admin) — check off a task</li>
+        <li><code>GET /api/locks</code> · <code>POST /api/locks</code> (admin)</li>
+        <li><code>PATCH /api/locks/:id</code> · <code>DELETE /api/locks/:id</code> (admin)</li>
+        <li><code>GET /api/calendar.ics</code> — subscribe / import in Outlook (CalDAV)</li>
+        <li><code>GET /auth/login</code> — start Microsoft Entra SSO</li>
       </ul>
     </div>
   `,

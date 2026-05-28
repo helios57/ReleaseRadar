@@ -33,7 +33,22 @@ import { BadgeComponent } from '../../../shared/ui/badge.component';
         <div class="rr-card" style="margin-top: 12px; padding: 14px;" [attr.data-test]="'lock-' + l.id">
           <div style="display:flex;align-items:center;gap:10px;justify-content:space-between;">
             <strong>{{ l.title }}</strong>
-            <rr-badge [tone]="l.kind === 'holiday' ? 'info' : 'danger'">{{ l.kind }}</rr-badge>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <rr-badge [tone]="l.kind === 'holiday' ? 'info' : 'danger'">{{ l.kind }}</rr-badge>
+              @if (canEdit()) {
+                <button class="rr-icon-btn" [attr.data-test]="'lock-edit-' + l.id" (click)="edit(l)" title="Edit">
+                  <rr-icon [d]="ICONS['code']" [size]="13" />
+                </button>
+                <button
+                  class="rr-icon-btn rr-md-row-x"
+                  [attr.data-test]="'lock-delete-' + l.id"
+                  (click)="remove(l)"
+                  title="Delete"
+                >
+                  <rr-icon [d]="ICONS['x']" [size]="13" />
+                </button>
+              }
+            </div>
           </div>
           <p class="rr-muted" style="margin:6px 0;">{{ l.description }}</p>
           <div class="rr-mono rr-muted" style="font-size:12px;">
@@ -80,5 +95,11 @@ export class LocksViewComponent {
   }
   protected newLock(): void {
     this.dialog.openLock();
+  }
+  protected edit(l: Lock): void {
+    this.dialog.openLock(l);
+  }
+  protected remove(l: Lock): void {
+    this.api.deleteLock(l.id).subscribe({ next: () => this.bus.bump() });
   }
 }
