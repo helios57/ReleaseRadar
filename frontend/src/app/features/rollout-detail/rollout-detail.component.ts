@@ -40,6 +40,10 @@ export class RolloutDetailComponent {
   protected prodColor = productColor;
 
   protected readonly busy = signal(false);
+  // Surfaced to the user when a save/delete/task-update fails, so a failed
+  // mutation isn't silently swallowed (the spinner just stopping looks like
+  // success until the next refetch reverts).
+  protected readonly actionError = signal<string | null>(null);
   protected readonly failingIndex = signal<number | null>(null);
   protected readonly reasonDraft = signal('');
   protected readonly editing = signal(false);
@@ -114,9 +118,13 @@ export class RolloutDetailComponent {
       if (!matchesProduct) return false;
       const ls = new Date(l.startAt).getTime();
       const le = new Date(l.endAt).getTime();
+      // A stage conflicts if its execution window [start, start+duration)
+      // overlaps the lock window — not just its start instant (a stage that
+      // starts before the lock but runs into it is still blocked).
       return r.stages.some((st) => {
-        const t = new Date(st.startAt).getTime();
-        return t >= ls && t <= le;
+        const start = new Date(st.startAt).getTime();
+        const end = start + nsToHours(st.durationNs) * 3_600_000;
+        return start < le && end > ls;
       });
     });
   });
@@ -203,6 +211,7 @@ export class RolloutDetailComponent {
   }
   private patch(id: string, seq: number, status: string, reason: string): void {
     this.busy.set(true);
+    this.actionError.set(null);
     this.api.updateTask(id, seq, { status, reason }).subscribe({
       next: () => {
         this.busy.set(false);
@@ -210,7 +219,10 @@ export class RolloutDetailComponent {
         this.reasonDraft.set('');
         this.bus.bump();
       },
-      error: () => this.busy.set(false),
+      error: () => {
+        this.busy.set(false);
+        this.actionError.set('Could not update the task — please retry.');
+      },
     });
   }
 
@@ -267,6 +279,7 @@ export class RolloutDetailComponent {
     const d = this.draft();
     if (!d) return;
     this.busy.set(true);
+    this.actionError.set(null);
     this.api
       .updateRollout(d.id, {
         title: d.title,
@@ -284,7 +297,10 @@ export class RolloutDetailComponent {
           this.draft.set(null);
           this.bus.bump();
         },
-        error: () => this.busy.set(false),
+        error: () => {
+          this.busy.set(false);
+          this.actionError.set('Could not save changes — please retry.');
+        },
       });
   }
 
@@ -297,6 +313,7 @@ export class RolloutDetailComponent {
   }
   protected confirmDelete(id: string): void {
     this.busy.set(true);
+    this.actionError.set(null);
     this.api.deleteRollout(id).subscribe({
       next: () => {
         this.busy.set(false);
@@ -304,7 +321,11 @@ export class RolloutDetailComponent {
         this.bus.bump();
         this.router.navigate(['/timeline']);
       },
-      error: () => this.busy.set(false),
+      error: () => {
+        this.busy.set(false);
+        this.confirmingDelete.set(false);
+        this.actionError.set('Could not delete the rollout — please retry.');
+      },
     });
   }
 

@@ -63,7 +63,16 @@ func NewRouter(d Deps) http.Handler {
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	// Cap request bodies (defense against memory exhaustion on the JSON
+	// endpoints). The WS upgrade hijacks the connection and does not read
+	// r.Body, so this doesn't interfere with it.
+	const maxBodyBytes = 1 << 20 // 1 MiB
+	limited := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		mux.ServeHTTP(w, r)
+	})
+
 	// Wrap the whole tree in the session parser so every handler can see
 	// the user (if any).
-	return middleware.Authenticate(d.Sessions)(mux)
+	return middleware.Authenticate(d.Sessions)(limited)
 }

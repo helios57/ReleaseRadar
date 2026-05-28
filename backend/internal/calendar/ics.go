@@ -68,6 +68,8 @@ func statusICS(s domain.StageStatus) string {
 func escape(s string) string {
 	r := strings.NewReplacer(
 		`\`, `\\`,
+		"\r\n", `\n`,
+		"\r", `\n`,
 		"\n", `\n`,
 		",", `\,`,
 		";", `\;`,

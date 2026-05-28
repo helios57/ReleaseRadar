@@ -1,5 +1,11 @@
 @if (rollout(); as r) {
   <div class="rr-detail-page" data-test="rollout-detail">
+    @if (actionError(); as err) {
+      <div class="rr-banner rr-banner-danger" role="alert" data-test="detail-error">
+        <rr-icon [d]="ICONS['warn']" [size]="16" />
+        <div><strong>Action failed.</strong><p>{{ err }}</p></div>
+      </div>
+    }
     <header class="rr-detail-head">
       <div class="rr-drawer-head-l">
         <button class="rr-detail-back" (click)="back()">

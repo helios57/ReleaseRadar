@@ -31,7 +31,7 @@ func (h *handlers) login(w http.ResponseWriter, r *http.Request) {
 	}
 	state := auth.RandomState()
 	nonce := auth.RandomState()
-	auth.WriteOIDCCookies(w, state, nonce, r.TLS != nil)
+	auth.WriteOIDCCookies(w, state, nonce, secureRequest(r))
 	http.Redirect(w, r, h.OIDC.AuthCodeURL(state, nonce), http.StatusFound)
 }
 
@@ -48,7 +48,7 @@ func (h *handlers) callback(w http.ResponseWriter, r *http.Request) {
 	if nonceCookie, nerr := r.Cookie("rr_oidc_nonce"); nerr == nil {
 		expectedNonce = nonceCookie.Value
 	}
-	auth.ClearOIDCCookies(w, r.TLS != nil)
+	auth.ClearOIDCCookies(w, secureRequest(r))
 
 	if stateErr != nil || stateCookie.Value != r.URL.Query().Get("state") {
 		http.Error(w, "invalid state", http.StatusBadRequest)
@@ -85,7 +85,7 @@ func (h *handlers) callback(w http.ResponseWriter, r *http.Request) {
 		Role:   role,
 		Groups: groups,
 	}
-	if err := h.Sessions.Issue(w, sess, r.TLS != nil); err != nil {
+	if err := h.Sessions.Issue(w, sess, secureRequest(r)); err != nil {
 		http.Error(w, "session issue failed", http.StatusInternalServerError)
 		return
 	}
@@ -93,7 +93,7 @@ func (h *handlers) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handlers) logout(w http.ResponseWriter, r *http.Request) {
-	h.Sessions.Clear(w, r.TLS != nil)
+	h.Sessions.Clear(w, secureRequest(r))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -410,15 +410,23 @@ func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
 			channel = "TMS_PROD"
 			advances = []time.Duration{time.Hour}
 		}
+		scheduled := false
 		for _, adv := range advances {
 			fireAt := st.StartAt.Add(-adv)
-			// If the requested advance is already in the past (rollout created
-			// late), clip to "now" so the scheduler still fires once on the
-			// next tick instead of dropping the notification on the floor.
-			if fireAt.Before(now) {
-				fireAt = now.Add(time.Second)
+			// Only schedule advance windows that are still in the future. A
+			// short-lead stage (e.g. a hotfix whose prod stage is 24h out) must
+			// NOT clip its 1w/2w windows to "now" — that would fire a spurious
+			// early announcement. Past windows are simply dropped here.
+			if fireAt.After(now) {
+				items = append(items, store.ScheduledNotification{StageSeq: i, Channel: channel, FireAt: fireAt})
+				scheduled = true
 			}
-			items = append(items, store.ScheduledNotification{StageSeq: i, Channel: channel, FireAt: fireAt})
+		}
+		// If no window remains in the future (rollout created late, or a
+		// very-short-lead stage), still fire exactly one catch-up notification
+		// on the next tick so the stage isn't announced not at all.
+		if !scheduled {
+			items = append(items, store.ScheduledNotification{StageSeq: i, Channel: channel, FireAt: now.Add(time.Second)})
 		}
 	}
 	// Replace the rollout's unsent notifications atomically: a single transaction
@@ -450,6 +458,14 @@ func normalizeAndValidateLock(in *domain.Lock) string {
 		return "endAt must be after startAt"
 	}
 	return ""
+}
+
+// secureRequest reports whether the original client reached us over HTTPS,
+// honoring X-Forwarded-Proto from the trusted reverse proxy (the backend speaks
+// plain HTTP behind nginx, so r.TLS is nil even when the user is on HTTPS).
+// Used to set the cookie Secure flag correctly behind TLS termination.
+func secureRequest(r *http.Request) bool {
+	return r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func writeJSON(w http.ResponseWriter, status int, body any) {

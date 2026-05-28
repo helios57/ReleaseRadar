@@ -308,10 +308,20 @@ export class CreateRolloutModalComponent {
   // Non-blocking advisories: no rollouts on Fridays or before Bernese holidays.
   protected readonly scheduleAdvisories = computed(() => {
     const out: string[] = [];
+    const now = Date.now();
     for (const s of this.preview()) {
       const d = new Date(s.startAt);
+      const meta = getStage(s.env);
+      // Warn if the stage gives less than its policy minimum advance notice
+      // (non-prod ≥1h, prod1 ≥1w, prod2 ≥2w).
+      const leadHours = (d.getTime() - now) / 3_600_000;
+      if (meta.minAdvanceHours && leadHours < meta.minAdvanceHours) {
+        out.push(
+          `${meta.label}: only ${Math.max(0, Math.round(leadHours))}h lead time — policy asks for ≥ ${meta.minAdvanceHours}h advance notice.`,
+        );
+      }
       for (const w of scheduleWarnings(d)) {
-        out.push(`${getStage(s.env).label}: ${w}`);
+        out.push(`${meta.label}: ${w}`);
       }
     }
     return out;

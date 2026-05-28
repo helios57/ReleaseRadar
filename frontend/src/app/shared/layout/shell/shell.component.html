@@ -87,8 +87,9 @@
     </div>
 
     <div class="rr-side-foot">
-      <div class="rr-foot-row">
-        <span class="rr-status-dot"></span> API healthy · 11ms
+      <div class="rr-foot-row" data-test="footer-health">
+        <span class="rr-status-dot"></span>
+        {{ liveStatus() === 'live' ? 'Live updates connected' : liveLabel() }}
       </div>
       <div class="rr-foot-row rr-foot-muted">v0.1.0 · dev</div>
     </div>

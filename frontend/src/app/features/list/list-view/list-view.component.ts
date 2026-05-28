@@ -258,9 +258,18 @@ export class ListViewComponent {
     return g;
   });
 
+  // Precompute counts once per data change instead of filtering the full list
+  // per status button on every change-detection pass.
+  protected readonly statusCounts = computed<Record<string, number>>(() => {
+    const m: Record<string, number> = { all: 0 };
+    for (const r of this.rows()) {
+      m['all']++;
+      m[r.stage.status] = (m[r.stage.status] ?? 0) + 1;
+    }
+    return m;
+  });
   protected count(id: string): number {
-    if (id === 'all') return this.rows().length;
-    return this.rows().filter((r) => r.stage.status === id).length;
+    return this.statusCounts()[id] ?? 0;
   }
   protected statusTone(s: StageStatus): 'neutral' | 'info' | 'warn' | 'danger' | 'ok' {
     return STATUS_TONE[s] ?? 'neutral';

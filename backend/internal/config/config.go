@@ -100,6 +100,9 @@ func Load() (Config, error) {
 	if c.SessionSecret == "" {
 		return c, fmt.Errorf("RR_SESSION_SECRET is required")
 	}
+	if len(c.SessionSecret) < 16 {
+		return c, fmt.Errorf("RR_SESSION_SECRET must be at least 16 characters (got %d)", len(c.SessionSecret))
+	}
 	return c, nil
 }
 

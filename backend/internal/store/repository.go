@@ -224,12 +224,99 @@ func (r *Repository) Rollouts(ctx context.Context) ([]domain.Rollout, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range out {
-		if err := r.hydrate(ctx, &out[i]); err != nil {
-			return nil, err
-		}
+	if err := r.hydrateAll(ctx, out); err != nil {
+		return nil, err
 	}
 	return out, nil
+}
+
+// hydrateAll fills stages/actors/tasks for a whole slice of rollouts using one
+// batched query per child table (WHERE rollout_id = ANY($1)) instead of the
+// per-row 3-query fan-out — turning a 1+3N list query into a constant 4.
+func (r *Repository) hydrateAll(ctx context.Context, rollouts []domain.Rollout) error {
+	for i := range rollouts {
+		rollouts[i].Stages = []domain.RolloutStage{}
+		rollouts[i].Pair = []string{}
+		rollouts[i].Tasks = []domain.RolloutTask{}
+	}
+	if len(rollouts) == 0 {
+		return nil
+	}
+	ids := make([]string, len(rollouts))
+	idx := make(map[string]int, len(rollouts))
+	for i := range rollouts {
+		ids[i] = rollouts[i].ID
+		idx[rollouts[i].ID] = i
+	}
+
+	// stages (ordered by seq within each rollout)
+	srows, err := r.pool.Query(ctx, `
+		SELECT rollout_id, env, start_at, duration, status
+		FROM rollout_stages WHERE rollout_id = ANY($1) ORDER BY rollout_id, seq
+	`, ids)
+	if err != nil {
+		return err
+	}
+	for srows.Next() {
+		var rid, status string
+		var s domain.RolloutStage
+		if err := srows.Scan(&rid, &s.Env, &s.StartAt, &s.Duration, &status); err != nil {
+			srows.Close()
+			return err
+		}
+		s.Status = domain.StageStatus(status)
+		if i, ok := idx[rid]; ok {
+			rollouts[i].Stages = append(rollouts[i].Stages, s)
+		}
+	}
+	srows.Close()
+	if err := srows.Err(); err != nil {
+		return err
+	}
+
+	// actors (pair)
+	arows, err := r.pool.Query(ctx, `SELECT rollout_id, actor_id FROM rollout_actors WHERE rollout_id = ANY($1)`, ids)
+	if err != nil {
+		return err
+	}
+	for arows.Next() {
+		var rid, actorID string
+		if err := arows.Scan(&rid, &actorID); err != nil {
+			arows.Close()
+			return err
+		}
+		if i, ok := idx[rid]; ok {
+			rollouts[i].Pair = append(rollouts[i].Pair, actorID)
+		}
+	}
+	arows.Close()
+	if err := arows.Err(); err != nil {
+		return err
+	}
+
+	// tasks (ordered by seq within each rollout)
+	trows, err := r.pool.Query(ctx, `
+		SELECT rollout_id, seq, description, status, reason, COALESCE(completed_by,''), completed_at
+		FROM rollout_tasks WHERE rollout_id = ANY($1) ORDER BY rollout_id, seq
+	`, ids)
+	if err != nil {
+		return err
+	}
+	for trows.Next() {
+		var rid string
+		var t domain.RolloutTask
+		var at *time.Time
+		if err := trows.Scan(&rid, &t.Index, &t.Description, &t.Status, &t.Reason, &t.By, &at); err != nil {
+			trows.Close()
+			return err
+		}
+		t.At = at
+		if i, ok := idx[rid]; ok {
+			rollouts[i].Tasks = append(rollouts[i].Tasks, t)
+		}
+	}
+	trows.Close()
+	return trows.Err()
 }
 
 func (r *Repository) Rollout(ctx context.Context, id string) (domain.Rollout, error) {
