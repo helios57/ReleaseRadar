@@ -59,6 +59,59 @@ test('admin can create a lock', async ({ request }) => {
   expect(list.some((l: { id: string }) => l.id === created.id)).toBeTruthy();
 });
 
+test('GET unknown rollout returns 404', async ({ request }) => {
+  const res = await request.get('/api/rollouts/does-not-exist');
+  expect(res.status()).toBe(404);
+});
+
+test('admin can create master data then a rollout that inherits its tasks', async ({ request }) => {
+  // 1. Create a product.
+  const productId = `e2e-prod-${Date.now()}`;
+  const p = await request.post('/api/products', {
+    data: { id: productId, name: 'e2e product', owner: 'e2e', brokers: ['b1', 'b2'] },
+  });
+  expect(p.status()).toBe(200);
+
+  // 2. Create a rollout type carrying a bespoke task list.
+  const typeId = `e2e-type-${Date.now()}`;
+  const tasks = ['e2e task A', 'e2e task B', 'e2e task C'];
+  const t = await request.post('/api/rollout-types', {
+    data: {
+      id: typeId,
+      name: 'e2e type',
+      short: 'e2e',
+      tone: 'info',
+      cascadePlan: [{ stage: 'non-prod', delayHours: 0 }],
+      rules: ['rule one'],
+      tasks,
+    },
+  });
+  expect(t.status()).toBe(200);
+
+  // 3. The new type must be visible in master data with its tasks.
+  const types = await (await request.get('/api/rollout-types')).json();
+  const created = types.find((x: { id: string }) => x.id === typeId);
+  expect(created).toBeTruthy();
+  expect(created.tasks).toEqual(tasks);
+
+  // 4. Create a rollout of that type — tasks must be inherited verbatim.
+  const startAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const r = await request.post('/api/rollouts', {
+    data: {
+      product: productId,
+      typeId,
+      title: 'e2e inheritance check',
+      descExt: 'x',
+      stages: [{ env: 'non-prod', startAt, durationNs: 3600000000000, status: 'scheduled' }],
+      pair: [],
+    },
+  });
+  expect(r.status()).toBe(201);
+  const created2 = await r.json();
+  const fresh = await (await request.get(`/api/rollouts/${created2.id}`)).json();
+  expect(fresh.tasks.map((x: { description: string }) => x.description)).toEqual(tasks);
+});
+
 test('updating a rollout task records completion + actor', async ({ request }) => {
   const rollouts = await (await request.get('/api/rollouts')).json();
   expect(rollouts.length).toBeGreaterThan(0);

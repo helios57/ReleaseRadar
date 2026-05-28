@@ -71,6 +71,41 @@ test('creating a non-prod rollout dispatches a Teams notification', async ({ req
   await teams.dispose();
 });
 
+test('a prod1 rollout stage dispatches to the TMS_PROD channel', async ({ request }) => {
+  const teams = await teamsClient();
+  await teams.post('/reset');
+
+  const title = `e2e-prod1-${Date.now()}`;
+  // prod1 windows are 1w/1d/1h; a stage 30 min out clips them all to "now"
+  // so the dispatcher fires on the next tick.
+  const startAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+  const create = await request.post('/api/rollouts', {
+    data: {
+      product: 'operator',
+      typeId: 'operator-feature',
+      title,
+      descExt: 'e2e prod1 dispatch',
+      stages: [{ env: 'prod1', startAt, durationNs: 3600000000000, status: 'scheduled' }],
+      pair: [],
+    },
+  });
+  expect(create.status()).toBe(201);
+
+  const entry = await waitForReceived(teams, 'TMS_PROD', (e) => {
+    try {
+      return JSON.stringify(e.body.attachments[0].content).includes(title);
+    } catch {
+      return false;
+    }
+  });
+  expect(entry.body.attachments[0].contentType).toBe(
+    'application/vnd.microsoft.card.adaptive',
+  );
+  // The card should carry the prod1 stage env in a fact.
+  expect(JSON.stringify(entry.body)).toContain('prod1');
+  await teams.dispose();
+});
+
 test('mock-teams rejects malformed payloads (validates our payload validator)', async () => {
   const teams = await teamsClient();
   const bad = await teams.post('/webhook/TMS_PROD', {
