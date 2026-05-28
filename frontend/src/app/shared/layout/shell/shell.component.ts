@@ -5,10 +5,13 @@ import { catchError, of } from 'rxjs';
 
 import { ApiService } from '../../../core/api/api.service';
 import { SessionStore } from '../../../core/auth/session.store';
+import { DialogStore } from '../../../core/dialog.store';
 import { productColor, STAGE } from '../../../core/stage';
 import { Product } from '../../../core/models/rollout.models';
 import { IconComponent, ICONS } from '../../ui/icon.component';
 import { AvatarComponent } from '../../ui/avatar.component';
+import { CreateRolloutModalComponent } from '../../../features/create/create-rollout-modal.component';
+import { CreateLockModalComponent } from '../../../features/create/create-lock-modal.component';
 
 interface NavItem {
   id: string;
@@ -21,12 +24,21 @@ interface NavItem {
 @Component({
   selector: 'rr-shell',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [RouterOutlet, RouterLink, RouterLinkActive, IconComponent, AvatarComponent],
+  imports: [
+    RouterOutlet,
+    RouterLink,
+    RouterLinkActive,
+    IconComponent,
+    AvatarComponent,
+    CreateRolloutModalComponent,
+    CreateLockModalComponent,
+  ],
   templateUrl: './shell.component.html',
 })
 export class ShellComponent {
   private api = inject(ApiService);
   protected session = inject(SessionStore);
+  protected dialog = inject(DialogStore);
   protected ICONS = ICONS;
   protected STAGE = STAGE;
   protected stageKeys = Object.keys(STAGE);
@@ -51,11 +63,11 @@ export class ShellComponent {
 
   protected onCreateRollout(): void {
     if (!this.canEdit()) return;
-    // TODO: open create-rollout modal (signal-driven dialog)
+    this.dialog.openRollout();
   }
 
   protected onCreateLock(): void {
     if (!this.canEdit()) return;
-    // TODO: open create-lock modal
+    this.dialog.openLock();
   }
 }

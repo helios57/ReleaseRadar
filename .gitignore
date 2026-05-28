@@ -25,3 +25,6 @@
 
 # OS
 .DS_Store
+
+# Playwright MCP browser artifacts
+.playwright-mcp/

@@ -1,6 +1,7 @@
 export type Role = 'admin' | 'readonly';
 export type StageEnv = 'non-prod' | 'prod1' | 'prod2' | string;
 export type StageStatus = 'scheduled' | 'active' | 'blocked' | 'done' | 'failed';
+export type TaskStatus = '' | 'done' | 'failed';
 
 export interface Actor {
   id: string;
@@ -17,7 +18,7 @@ export interface Product {
   brokers?: string[];
 }
 
-export interface RolloutTypeStage {
+export interface CascadeStage {
   stage: StageEnv;
   delayHours: number;
 }
@@ -27,18 +28,29 @@ export interface RolloutType {
   name: string;
   short: string;
   tone: 'neutral' | 'info' | 'warn' | 'danger' | 'ok';
-  cascadePlan: RolloutTypeStage[];
+  delayProd1Ns?: number;
+  delayProd2Ns?: number;
+  cascadePlan: CascadeStage[];
   announce?: string;
   rules: string[];
   tasks: string[];
 }
 
+/** Concrete dated entry; matches the Go wire format (absolute start + ns duration). */
 export interface RolloutStage {
   env: StageEnv;
-  offset: number;
-  time: string;
-  duration: number;
+  startAt: string;
+  durationNs: number;
   status: StageStatus;
+}
+
+export interface RolloutTask {
+  index: number;
+  description: string;
+  status: TaskStatus;
+  reason?: string;
+  by?: string;
+  at?: string;
 }
 
 export interface Rollout {
@@ -46,12 +58,15 @@ export interface Rollout {
   product: string;
   typeId: string;
   title: string;
-  stages: RolloutStage[];
-  pair: string[];
-  risks: string;
   descExt: string;
   descInt: string;
-  checked: number[];
+  risks: string;
+  stages: RolloutStage[];
+  pair: string[];
+  tasks: RolloutTask[];
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
 }
 
 export interface Lock {
@@ -59,10 +74,10 @@ export interface Lock {
   title: string;
   description: string;
   contact: string;
-  startOffset: number;
-  endOffset: number;
+  startAt: string;
+  endAt: string;
   products: string[];
-  kind: 'manual' | 'holiday';
+  kind: 'manual' | 'holiday' | 'window';
 }
 
 export interface SessionUser {

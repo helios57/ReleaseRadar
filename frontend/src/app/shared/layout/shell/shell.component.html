@@ -151,3 +151,10 @@
     <router-outlet />
   </main>
 </div>
+
+@if (dialog.open() === 'rollout') {
+  <rr-create-rollout-modal />
+}
+@if (dialog.open() === 'lock') {
+  <rr-create-lock-modal />
+}

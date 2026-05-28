@@ -1,0 +1,367 @@
+@if (session.role() === 'readonly') {
+  <div style="padding: 16px 18px;" class="rr-muted">
+    Master Data is restricted to administrators. You're signed in as <strong>readonly</strong>.
+  </div>
+} @else {
+  <div class="rr-md">
+    <div class="rr-md-head">
+      <div>
+        <h1 class="rr-md-title">Master Data</h1>
+        <p class="rr-md-sub">
+          Configure products and rollout types that drive the timeline and the execute flow.
+        </p>
+      </div>
+    </div>
+
+    <div class="rr-md-tabs">
+      <button class="rr-md-tab" [class.is-active]="tab() === 'products'" (click)="tab.set('products')">
+        Products
+      </button>
+      <button class="rr-md-tab" [class.is-active]="tab() === 'types'" (click)="tab.set('types')">
+        Rollout Types
+      </button>
+    </div>
+
+    @if (error()) {
+      <div class="rr-banner rr-banner-danger" style="margin: 10px 0;" data-test="md-error">
+        <rr-icon [d]="ICONS['warn']" [size]="16" />
+        <div><strong>Save failed.</strong><p>{{ error() }}</p></div>
+      </div>
+    }
+
+    <div class="rr-md-body">
+      <!-- ============ PRODUCTS ============ -->
+      @if (tab() === 'products') {
+        <div class="rr-md-grid">
+          <aside class="rr-md-list">
+            <div class="rr-md-list-head">
+              <span class="rr-md-list-count">{{ products().length }} entries</span>
+              <button class="rr-btn rr-btn-primary rr-btn-sm" (click)="newProduct()" data-test="md-new-product">
+                <rr-icon [d]="ICONS['plus']" [size]="12" /> New product
+              </button>
+            </div>
+            <ul class="rr-md-list-items">
+              @for (p of products(); track p.id) {
+                <li>
+                  <button
+                    class="rr-md-list-row"
+                    [class.is-active]="productDraft()?.id === p.id"
+                    (click)="selectProduct(p)"
+                  >
+                    <span class="rr-md-list-dot" [style.background]="productColor(p.id)"></span>
+                    <div class="rr-md-list-body">
+                      <div class="rr-md-list-name">{{ p.name }}</div>
+                      <div class="rr-md-list-meta">
+                        <span>{{ p.owner || '—' }}</span>
+                        <span class="rr-md-list-sep">·</span>
+                        <span class="rr-mono">{{ (p.brokers || []).length }} brokers</span>
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              }
+            </ul>
+          </aside>
+
+          <section class="rr-md-detail">
+            @if (productDraft(); as p) {
+              <div class="rr-md-detail-inner" data-test="md-product-detail">
+                <header class="rr-md-detail-head">
+                  <div class="rr-md-detail-head-l">
+                    <div>
+                      <div class="rr-md-detail-eyebrow">
+                        PRODUCT · <span class="rr-mono">{{ p.id || '(new)' }}</span>
+                      </div>
+                      <h2>{{ p.name }}</h2>
+                    </div>
+                  </div>
+                </header>
+
+                <div class="rr-md-section">
+                  <div class="rr-md-section-title">Identity</div>
+                  <div class="rr-form-grid">
+                    <label class="rr-field">
+                      <span>Name</span>
+                      <input
+                        data-test="md-product-name"
+                        [value]="p.name"
+                        (input)="patchProduct({ name: $any($event.target).value })"
+                      />
+                    </label>
+                    <label class="rr-field">
+                      <span>Owner / Team</span>
+                      <input [value]="p.owner || ''" (input)="patchProduct({ owner: $any($event.target).value })" />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rr-md-section">
+                  <div class="rr-md-section-title">
+                    Brokers <span class="rr-muted">({{ (p.brokers || []).length }})</span>
+                  </div>
+                  <div class="rr-md-broker-grid">
+                    @for (b of p.brokers || []; track b) {
+                      <div class="rr-md-broker">
+                        <code>{{ b }}</code>
+                        <button class="rr-md-broker-x" (click)="removeBroker(b)" title="Remove">
+                          <rr-icon [d]="ICONS['x']" [size]="11" />
+                        </button>
+                      </div>
+                    }
+                    <div class="rr-md-broker-add">
+                      <input
+                        placeholder="e.g. frankfurt-03"
+                        [value]="brokerDraft()"
+                        (input)="brokerDraft.set($any($event.target).value)"
+                        (keydown.enter)="addBroker()"
+                      />
+                      <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="addBroker()">
+                        <rr-icon [d]="ICONS['plus']" [size]="11" /> Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="rr-md-detail-foot" style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;">
+                  <button
+                    class="rr-btn rr-btn-primary"
+                    data-test="md-save-product"
+                    [disabled]="saving() || !p.name.trim()"
+                    (click)="saveProduct()"
+                  >
+                    {{ saving() ? 'Saving…' : 'Save product' }}
+                  </button>
+                </div>
+              </div>
+            } @else {
+              <div class="rr-md-empty">Select a product or create a new one.</div>
+            }
+          </section>
+        </div>
+      }
+
+      <!-- ============ ROLLOUT TYPES ============ -->
+      @if (tab() === 'types') {
+        <div class="rr-md-grid">
+          <aside class="rr-md-list">
+            <div class="rr-md-list-head">
+              <span class="rr-md-list-count">{{ types().length }} entries</span>
+              <button class="rr-btn rr-btn-primary rr-btn-sm" (click)="newType()" data-test="md-new-type">
+                <rr-icon [d]="ICONS['plus']" [size]="12" /> New rollout type
+              </button>
+            </div>
+            <ul class="rr-md-list-items">
+              @for (t of types(); track t.id) {
+                <li>
+                  <button
+                    class="rr-md-list-row"
+                    [class.is-active]="typeDraft()?.id === t.id"
+                    (click)="selectType(t)"
+                  >
+                    <rr-badge [tone]="t.tone">{{ t.short }}</rr-badge>
+                    <div class="rr-md-list-body">
+                      <div class="rr-md-list-name">{{ t.name }}</div>
+                      <div class="rr-md-list-meta">
+                        <span>{{ t.cascadePlan.length > 1 ? 'cascade · ' + t.cascadePlan.length + ' stages' : 'single-stage' }}</span>
+                        <span class="rr-md-list-sep">·</span>
+                        <span class="rr-mono">{{ t.tasks.length }} tasks</span>
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              }
+            </ul>
+          </aside>
+
+          <section class="rr-md-detail">
+            @if (typeDraft(); as t) {
+              <div class="rr-md-detail-inner" data-test="md-type-detail">
+                <header class="rr-md-detail-head">
+                  <div class="rr-md-detail-head-l">
+                    <rr-badge [tone]="t.tone">{{ t.short }}</rr-badge>
+                    <div>
+                      <div class="rr-md-detail-eyebrow">
+                        ROLLOUT TYPE · <span class="rr-mono">{{ t.id || '(new)' }}</span>
+                      </div>
+                      <h2>{{ t.name }}</h2>
+                    </div>
+                  </div>
+                </header>
+
+                <div class="rr-md-section">
+                  <div class="rr-md-section-title">Identity</div>
+                  <div class="rr-form-grid">
+                    <label class="rr-field">
+                      <span>Display name</span>
+                      <input
+                        data-test="md-type-name"
+                        [value]="t.name"
+                        (input)="patchType({ name: $any($event.target).value })"
+                      />
+                    </label>
+                    <label class="rr-field">
+                      <span>Short label</span>
+                      <input [value]="t.short" (input)="patchType({ short: $any($event.target).value })" />
+                    </label>
+                    <label class="rr-field">
+                      <span>Severity tone</span>
+                      <select [value]="t.tone" (change)="patchType({ tone: $any($event.target).value })">
+                        <option value="neutral">Neutral</option>
+                        <option value="info">Info</option>
+                        <option value="warn">Warning</option>
+                        <option value="danger">Danger</option>
+                        <option value="ok">OK</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="rr-md-section">
+                  <div class="rr-md-section-title">
+                    Cascade plan <span class="rr-muted">({{ t.cascadePlan.length }} stages)</span>
+                  </div>
+                  <ol class="rr-cp-list">
+                    @for (s of t.cascadePlan; track $index; let i = $index) {
+                      <li class="rr-cp-row">
+                        <div
+                          class="rr-cp-row-stagechip"
+                          [style.background]="getStage(s.stage).color"
+                          style="color:#0a0a0c"
+                        >
+                          {{ getStage(s.stage).short }}
+                        </div>
+                        <div class="rr-cp-row-body">
+                          <div class="rr-cp-row-stage">
+                            <select [value]="s.stage" (change)="patchStage(i, { stage: $any($event.target).value })">
+                              @for (k of stageKeys; track k) {
+                                <option [value]="k">{{ getStage(k).label }}</option>
+                              }
+                            </select>
+                            <span class="rr-cp-row-meta">
+                              <rr-icon [d]="ICONS['bolt']" [size]="11" /> announces on
+                              <strong>{{ getStage(s.stage).announceChannel }}</strong>
+                            </span>
+                          </div>
+                          <label class="rr-field">
+                            <span>Delay from start (hours)</span>
+                            <div class="rr-cp-row-delay-input">
+                              <input
+                                type="number"
+                                min="0"
+                                step="1"
+                                [value]="s.delayHours"
+                                [disabled]="i === 0"
+                                (input)="patchStage(i, { delayHours: +$any($event.target).value })"
+                              />
+                              <span class="rr-cp-row-delay-suffix">= {{ formatDelay(s.delayHours) }}</span>
+                            </div>
+                          </label>
+                        </div>
+                        <div class="rr-cp-row-tools">
+                          <button class="rr-icon-btn rr-md-row-x" (click)="removeStage(i)" title="Remove">
+                            <rr-icon [d]="ICONS['x']" [size]="12" />
+                          </button>
+                        </div>
+                      </li>
+                    }
+                  </ol>
+                  @if (unusedStageKeys().length) {
+                    <div class="rr-cp-add">
+                      <span class="rr-cp-add-label">Add stage:</span>
+                      @for (k of unusedStageKeys(); track k) {
+                        <button class="rr-cp-add-btn" (click)="addStage(k)">
+                          <span
+                            class="rr-md-stage-chip"
+                            [style.background]="getStage(k).color"
+                            style="color:#0a0a0c"
+                            >{{ getStage(k).short }}</span
+                          >
+                          {{ getStage(k).label }}
+                        </button>
+                      }
+                    </div>
+                  }
+                </div>
+
+                <div class="rr-md-section">
+                  <div class="rr-md-section-title">Rules <span class="rr-muted">({{ t.rules.length }})</span></div>
+                  <ul class="rr-md-rules">
+                    @for (r of t.rules; track $index; let i = $index) {
+                      <li>
+                        <rr-icon [d]="ICONS['check']" [size]="12" />
+                        <span>{{ r }}</span>
+                        <button class="rr-md-row-x" (click)="removeRule(i)"><rr-icon [d]="ICONS['x']" [size]="11" /></button>
+                      </li>
+                    }
+                  </ul>
+                  <div class="rr-md-row-add">
+                    <input
+                      placeholder="Add a rule…"
+                      [value]="ruleDraft()"
+                      (input)="ruleDraft.set($any($event.target).value)"
+                      (keydown.enter)="addRule()"
+                    />
+                    <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="addRule()">
+                      <rr-icon [d]="ICONS['plus']" [size]="11" /> Add rule
+                    </button>
+                  </div>
+                </div>
+
+                <div class="rr-md-section">
+                  <div class="rr-md-section-title">
+                    Inherited tasks <span class="rr-muted">({{ t.tasks.length }})</span>
+                  </div>
+                  <p class="rr-md-section-hint">Copied into every new rollout of this type. Order matters.</p>
+                  <ol class="rr-md-tasks">
+                    @for (task of t.tasks; track $index; let i = $index) {
+                      <li class="rr-md-task">
+                        <span class="rr-md-task-no rr-mono">{{ pad(i + 1) }}</span>
+                        <input [value]="task" (input)="editTask(i, $any($event.target).value)" />
+                        <div class="rr-md-task-tools">
+                          <button class="rr-icon-btn" (click)="moveTask(i, -1)" title="Move up">
+                            <rr-icon [d]="ICONS['chev']" [size]="12" class="rr-rot-270" />
+                          </button>
+                          <button class="rr-icon-btn" (click)="moveTask(i, 1)" title="Move down">
+                            <rr-icon [d]="ICONS['chev']" [size]="12" class="rr-rot-90" />
+                          </button>
+                          <button class="rr-icon-btn rr-md-row-x" (click)="removeTask(i)" title="Remove">
+                            <rr-icon [d]="ICONS['x']" [size]="12" />
+                          </button>
+                        </div>
+                      </li>
+                    }
+                  </ol>
+                  <div class="rr-md-row-add">
+                    <input
+                      data-test="md-task-draft"
+                      placeholder="Add a task…"
+                      [value]="taskDraft()"
+                      (input)="taskDraft.set($any($event.target).value)"
+                      (keydown.enter)="addTask()"
+                    />
+                    <button class="rr-btn rr-btn-ghost rr-btn-sm" data-test="md-add-task" (click)="addTask()">
+                      <rr-icon [d]="ICONS['plus']" [size]="11" /> Add task
+                    </button>
+                  </div>
+                </div>
+
+                <div class="rr-md-detail-foot" style="display:flex;justify-content:flex-end;gap:8px;padding-top:8px;">
+                  <button
+                    class="rr-btn rr-btn-primary"
+                    data-test="md-save-type"
+                    [disabled]="saving() || !t.name.trim()"
+                    (click)="saveType()"
+                  >
+                    {{ saving() ? 'Saving…' : 'Save rollout type' }}
+                  </button>
+                </div>
+              </div>
+            } @else {
+              <div class="rr-md-empty">Select a rollout type or create a new one.</div>
+            }
+          </section>
+        </div>
+      }
+    </div>
+  </div>
+}

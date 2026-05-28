@@ -10,9 +10,10 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { catchError, forkJoin, of } from 'rxjs';
+import { catchError, forkJoin, of, switchMap } from 'rxjs';
 
 import { ApiService } from '../../../core/api/api.service';
+import { RefreshBus } from '../../../core/refresh.bus';
 import { addDays, dateKey, getStage, productColor } from '../../../core/stage';
 import { Lock, Rollout, RolloutType } from '../../../core/models/rollout.models';
 import { IconComponent, ICONS } from '../../../shared/ui/icon.component';
@@ -39,6 +40,7 @@ const LABEL_W = 280;
 export class TimelineViewComponent {
   private api = inject(ApiService);
   private router = inject(Router);
+  private bus = inject(RefreshBus);
   protected ICONS = ICONS;
 
   protected DAY_W = DAY_W;
@@ -52,11 +54,15 @@ export class TimelineViewComponent {
   protected readonly today = signal(new Date());
 
   private data = toSignal(
-    forkJoin({
-      rollouts: this.api.rollouts().pipe(catchError(() => of<Rollout[]>([]))),
-      locks: this.api.locks().pipe(catchError(() => of<Lock[]>([]))),
-      types: this.api.rolloutTypes().pipe(catchError(() => of<RolloutType[]>([]))),
-    }),
+    this.bus.tick$.pipe(
+      switchMap(() =>
+        forkJoin({
+          rollouts: this.api.rollouts().pipe(catchError(() => of<Rollout[]>([]))),
+          locks: this.api.locks().pipe(catchError(() => of<Lock[]>([]))),
+          types: this.api.rolloutTypes().pipe(catchError(() => of<RolloutType[]>([]))),
+        }),
+      ),
+    ),
     { initialValue: { rollouts: [], locks: [], types: [] } },
   );
 

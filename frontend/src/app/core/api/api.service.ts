@@ -17,8 +17,16 @@ export class ApiService {
     return this.http.get<Product[]>(`${API}/products`);
   }
 
+  upsertProduct(body: Product): Observable<Product> {
+    return this.http.post<Product>(`${API}/products`, body);
+  }
+
   rolloutTypes(): Observable<RolloutType[]> {
     return this.http.get<RolloutType[]>(`${API}/rollout-types`);
+  }
+
+  upsertRolloutType(body: RolloutType): Observable<RolloutType> {
+    return this.http.post<RolloutType>(`${API}/rollout-types`, body);
   }
 
   rollouts(): Observable<Rollout[]> {
@@ -33,8 +41,12 @@ export class ApiService {
     return this.http.post<Rollout>(`${API}/rollouts`, body);
   }
 
-  updateRollout(id: string, body: Partial<Rollout>): Observable<Rollout> {
-    return this.http.patch<Rollout>(`${API}/rollouts/${id}`, body);
+  updateTask(
+    id: string,
+    seq: number,
+    body: { status: string; reason: string },
+  ): Observable<void> {
+    return this.http.patch<void>(`${API}/rollouts/${id}/tasks/${seq}`, body);
   }
 
   locks(): Observable<Lock[]> {

@@ -74,6 +74,43 @@ export function formatDelay(hours: number): string {
 }
 
 const MS_PER_DAY = 86400000;
+const NS_PER_HOUR = 3_600_000_000_000;
+
+export function hoursToNs(hours: number): number {
+  return Math.round((Number(hours) || 0) * NS_PER_HOUR);
+}
+export function nsToHours(ns: number): number {
+  return (Number(ns) || 0) / NS_PER_HOUR;
+}
+
+export interface PlannedStage {
+  env: string;
+  startAt: string;
+  durationNs: number;
+  status: 'scheduled';
+}
+
+/**
+ * Expands a RolloutType cascade plan into concrete dated stages. The first
+ * entry anchors at `baseISO`; each subsequent entry is offset by its
+ * delayHours. An empty plan yields a single non-prod stage at the anchor.
+ */
+export function cascadeStages(
+  baseISO: string,
+  plan: { stage: string; delayHours: number }[],
+  durationHours: number,
+): PlannedStage[] {
+  const base = new Date(baseISO).getTime();
+  const durationNs = hoursToNs(durationHours);
+  const entries = plan && plan.length ? plan : [{ stage: 'non-prod', delayHours: 0 }];
+  return entries.map((p) => ({
+    env: p.stage,
+    startAt: new Date(base + (p.delayHours || 0) * 3600000).toISOString(),
+    durationNs,
+    status: 'scheduled' as const,
+  }));
+}
+
 export function dateKey(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
