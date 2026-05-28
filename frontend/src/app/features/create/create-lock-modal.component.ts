@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  afterNextRender,
+  computed,
+  inject,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, of } from 'rxjs';
 
@@ -15,12 +24,20 @@ type LockKind = 'manual' | 'holiday' | 'window';
   selector: 'rr-create-lock-modal',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [IconComponent],
+  host: { '(document:keydown.escape)': 'close()' },
   template: `
     <div class="rr-modal-scrim" (click)="close()">
-      <div class="rr-modal rr-modal-sm" (click)="$event.stopPropagation()" data-test="create-lock-modal">
+      <div
+        class="rr-modal rr-modal-sm"
+        (click)="$event.stopPropagation()"
+        data-test="create-lock-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rr-create-lock-title"
+      >
         <header class="rr-modal-head">
           <div>
-            <h2>{{ editId() ? 'Edit' : 'Create' }} rollout lock (Sperre)</h2>
+            <h2 id="rr-create-lock-title">{{ editId() ? 'Edit' : 'Create' }} rollout lock (Sperre)</h2>
             <p class="rr-modal-sub">Blocked time range — no rollouts should be scheduled or executed.</p>
           </div>
           <button class="rr-icon-btn" (click)="close()" aria-label="Close">
@@ -34,6 +51,7 @@ type LockKind = 'manual' | 'holiday' | 'window';
               <button
                 class="rr-seg-item"
                 [class.is-active]="kind() === o.id"
+                [attr.aria-pressed]="kind() === o.id"
                 (click)="kind.set(o.id)"
               >
                 {{ o.label }}
@@ -61,6 +79,7 @@ type LockKind = 'manual' | 'holiday' | 'window';
             <label class="rr-field rr-field-wide">
               <span>Title</span>
               <input
+                #titleInput
                 data-test="lock-title"
                 placeholder="e.g. Master Branch Bug #4029"
                 [value]="title()"
@@ -140,6 +159,11 @@ export class CreateLockModalComponent {
   private bus = inject(RefreshBus);
   protected ICONS = ICONS;
   protected productColor = productColor;
+  private readonly titleInput = viewChild<ElementRef<HTMLInputElement>>('titleInput');
+
+  constructor() {
+    afterNextRender(() => this.titleInput()?.nativeElement.focus());
+  }
 
   protected readonly kinds: { id: LockKind; label: string }[] = [
     { id: 'manual', label: 'Manual (master bug)' },

@@ -1,10 +1,13 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  ElementRef,
+  afterNextRender,
   computed,
   effect,
   inject,
   signal,
+  viewChild,
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -22,12 +25,20 @@ import { IconComponent, ICONS } from '../../shared/ui/icon.component';
   selector: 'rr-create-rollout-modal',
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [IconComponent],
+  host: { '(document:keydown.escape)': 'close()' },
   template: `
     <div class="rr-modal-scrim" (click)="close()">
-      <div class="rr-modal" (click)="$event.stopPropagation()" data-test="create-rollout-modal">
+      <div
+        class="rr-modal"
+        (click)="$event.stopPropagation()"
+        data-test="create-rollout-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="rr-create-rollout-title"
+      >
         <header class="rr-modal-head">
           <div>
-            <h2>Create rollout</h2>
+            <h2 id="rr-create-rollout-title">Create rollout</h2>
             <p class="rr-modal-sub">
               Inherits tasks, announcement rules, and cascade delays from the chosen RolloutType.
             </p>
@@ -42,6 +53,7 @@ import { IconComponent, ICONS } from '../../shared/ui/icon.component';
             <label class="rr-field rr-field-wide">
               <span>Title</span>
               <input
+                #titleInput
                 data-test="rollout-title"
                 placeholder="e.g. operator 24.7 — broker auth refactor"
                 [value]="title()"
@@ -254,6 +266,7 @@ export class CreateRolloutModalComponent {
   private router = inject(Router);
   protected ICONS = ICONS;
   protected getStage = getStage;
+  private readonly titleInput = viewChild<ElementRef<HTMLInputElement>>('titleInput');
 
   protected readonly products = toSignal(
     this.api.products().pipe(catchError(() => of<Product[]>([]))),
@@ -305,6 +318,8 @@ export class CreateRolloutModalComponent {
   });
 
   constructor() {
+    // Move focus into the dialog when it opens (accessibility).
+    afterNextRender(() => this.titleInput()?.nativeElement.focus());
     effect(() => {
       const ps = this.products();
       if (ps.length && !this.productId()) this.productId.set(ps[0].id);

@@ -181,6 +181,7 @@ test.describe('UI — admin create + execute flows', () => {
     await expect(page.getByText(newTitle)).toBeVisible({ timeout: 10_000 });
 
     await page.locator(`[data-test="lock-delete-${created.id}"]`).click();
+    await page.locator(`[data-test="lock-delete-confirm-${created.id}"]`).click();
     await expect(page.locator(`[data-test="lock-${created.id}"]`)).toHaveCount(0, { timeout: 10_000 });
   });
 

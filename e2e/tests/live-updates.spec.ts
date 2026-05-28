@@ -156,6 +156,43 @@ test.describe('Live updates over WebSocket', () => {
     }
   });
 
+  test('an edit one user makes is reflected live in another user\'s open detail view', async ({
+    browser,
+  }) => {
+    const adminCtx = await browser.newContext({ storageState: ADMIN.storagePath });
+    const readerCtx = await browser.newContext({ storageState: READONLY.storagePath });
+    const adminPage = await adminCtx.newPage();
+    const readerPage = await readerCtx.newPage();
+    try {
+      const { id } = await createRolloutViaUI(adminPage, 'live-ui-update');
+
+      // Reader opens the detail page; the live channel is healthy.
+      await readerPage.goto(`/#/rollout/${id}`);
+      await expect(readerPage.locator('[data-test="detail-descext"]')).toContainText(
+        'created via browser e2e',
+        { timeout: 15_000 },
+      );
+      await expect(readerPage.locator('[data-test="live-status"]')).toHaveText(/Live/i, {
+        timeout: 15_000,
+      });
+
+      // Admin edits the external description through the detail UI.
+      const newText = `edited live ${Date.now()}`;
+      await adminPage.goto(`/#/rollout/${id}`);
+      await adminPage.locator('[data-test="edit-rollout"]').click();
+      await adminPage.locator('[data-test="edit-descext"]').fill(newText);
+      await adminPage.locator('[data-test="save-rollout"]').click();
+
+      // The reader's open detail reflects the edit live — no reload.
+      await expect(readerPage.locator('[data-test="detail-descext"]')).toContainText(newText, {
+        timeout: 15_000,
+      });
+    } finally {
+      await adminCtx.close();
+      await readerCtx.close();
+    }
+  });
+
   test('one admin sees another admin\'s UI change live', async ({ browser }) => {
     const actorCtx = await browser.newContext({ storageState: ADMIN.storagePath });
     const observerCtx = await browser.newContext({ storageState: ADMIN.storagePath });

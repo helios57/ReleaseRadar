@@ -391,12 +391,8 @@ func stripInternal(r domain.Rollout) domain.Rollout {
 // rules: non-prod ≥ 1h, prod1 ≥ 1w, prod2 ≥ 2w. We pick the largest standard
 // advance window (≥ available time-to-start) so we don't fire in the past.
 func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
-	// Clear any previously-scheduled-but-unsent rows first so an updated stage
-	// time doesn't leave stale notifications that fire at the old time. On
-	// create this is a harmless no-op.
-	if err := h.Repo.DeleteUnsentNotifications(r.Context(), ro.ID); err != nil {
-		h.Logger.Error("clear stale notifications", "err", err, "rollout", ro.ID)
-	}
+	now := time.Now()
+	items := make([]store.ScheduledNotification, 0, len(ro.Stages)*3)
 	for i, st := range ro.Stages {
 		var channel string
 		var advances []time.Duration
@@ -414,7 +410,6 @@ func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
 			channel = "TMS_PROD"
 			advances = []time.Duration{time.Hour}
 		}
-		now := time.Now()
 		for _, adv := range advances {
 			fireAt := st.StartAt.Add(-adv)
 			// If the requested advance is already in the past (rollout created
@@ -423,12 +418,15 @@ func (h *handlers) scheduleNotifications(r *http.Request, ro domain.Rollout) {
 			if fireAt.Before(now) {
 				fireAt = now.Add(time.Second)
 			}
-			if err := h.Repo.ScheduleNotification(r.Context(), ro.ID, i, channel, fireAt); err != nil {
-				// Don't fail the request — the rollout was already persisted;
-				// just record that this advance-warning couldn't be scheduled.
-				h.Logger.Error("schedule notification", "err", err, "rollout", ro.ID, "stage", i, "channel", channel)
-			}
+			items = append(items, store.ScheduledNotification{StageSeq: i, Channel: channel, FireAt: fireAt})
 		}
+	}
+	// Replace the rollout's unsent notifications atomically: a single transaction
+	// deletes the stale rows and inserts the recomputed set, so a concurrent
+	// dispatcher tick can't observe a half-applied reschedule. Don't fail the
+	// request on error — the rollout was already persisted.
+	if err := h.Repo.RescheduleNotifications(r.Context(), ro.ID, items); err != nil {
+		h.Logger.Error("reschedule notifications", "err", err, "rollout", ro.ID)
 	}
 }
 

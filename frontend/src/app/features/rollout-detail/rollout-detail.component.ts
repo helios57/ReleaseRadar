@@ -50,11 +50,17 @@ export class RolloutDetailComponent {
   protected readonly isAdmin = computed(() => this.session.isAdmin());
   protected readonly canEdit = computed(() => this.session.canEdit());
 
-  private readonly id$ = this.route.paramMap.pipe(map((p) => p.get('id')));
-
   // True once we've successfully loaded the rollout at least once. Lets the
   // template tell "still loading" apart from "was here, now deleted".
   private readonly hadRollout = signal(false);
+
+  // Reset the deleted-tracking flag whenever the route id changes, so
+  // navigating from a deleted rollout to a valid one doesn't briefly flash the
+  // "deleted" state for the new (still-loading) rollout.
+  private readonly id$ = this.route.paramMap.pipe(
+    map((p) => p.get('id')),
+    tap(() => this.hadRollout.set(false)),
+  );
 
   protected readonly rollout = toSignal(
     combineLatest([this.id$, this.bus.tick$]).pipe(

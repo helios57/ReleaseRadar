@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { catchError, of, switchMap } from 'rxjs';
 
@@ -39,14 +39,27 @@ import { BadgeComponent } from '../../../shared/ui/badge.component';
                 <button class="rr-icon-btn" [attr.data-test]="'lock-edit-' + l.id" (click)="edit(l)" title="Edit">
                   <rr-icon [d]="ICONS['code']" [size]="13" />
                 </button>
-                <button
-                  class="rr-icon-btn rr-md-row-x"
-                  [attr.data-test]="'lock-delete-' + l.id"
-                  (click)="remove(l)"
-                  title="Delete"
-                >
-                  <rr-icon [d]="ICONS['x']" [size]="13" />
-                </button>
+                @if (confirmingId() === l.id) {
+                  <button
+                    class="rr-btn rr-btn-danger rr-btn-sm"
+                    [attr.data-test]="'lock-delete-confirm-' + l.id"
+                    (click)="confirmRemove(l)"
+                  >
+                    Confirm
+                  </button>
+                  <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="confirmingId.set(null)">
+                    Cancel
+                  </button>
+                } @else {
+                  <button
+                    class="rr-icon-btn rr-md-row-x"
+                    [attr.data-test]="'lock-delete-' + l.id"
+                    (click)="confirmingId.set(l.id)"
+                    title="Delete"
+                  >
+                    <rr-icon [d]="ICONS['x']" [size]="13" />
+                  </button>
+                }
               }
             </div>
           </div>
@@ -79,6 +92,7 @@ export class LocksViewComponent {
   protected ICONS = ICONS;
   protected productColor = productColor;
   protected readonly canEdit = computed(() => this.session.canEdit());
+  protected readonly confirmingId = signal<string | null>(null);
 
   protected readonly locks = toSignal(
     this.bus.tick$.pipe(switchMap(() => this.api.locks().pipe(catchError(() => of<Lock[]>([]))))),
@@ -99,7 +113,17 @@ export class LocksViewComponent {
   protected edit(l: Lock): void {
     this.dialog.openLock(l);
   }
-  protected remove(l: Lock): void {
-    this.api.deleteLock(l.id).subscribe({ next: () => this.bus.bump() });
+  protected confirmRemove(l: Lock): void {
+    this.api.deleteLock(l.id).subscribe({
+      next: () => {
+        this.confirmingId.set(null);
+        this.bus.bump();
+      },
+      error: () => {
+        // Keep the row; clear the confirm so the user can retry. The live
+        // channel will reconcile if it actually succeeded server-side.
+        this.confirmingId.set(null);
+      },
+    });
   }
 }

@@ -537,21 +537,38 @@ func (r *Repository) DeleteLock(ctx context.Context, id string) error {
 // a permanently-broken webhook doesn't retry on every tick forever.
 const notifyMaxAttempts = 5
 
-func (r *Repository) ScheduleNotification(ctx context.Context, rolloutID string, seq int, channel string, fireAt time.Time) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO notifications (rollout_id, stage_seq, channel, fire_at)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT DO NOTHING
-	`, rolloutID, seq, channel, fireAt)
-	return err
+// ScheduledNotification is one advance-warning to enqueue for a rollout stage.
+type ScheduledNotification struct {
+	StageSeq int
+	Channel  string
+	FireAt   time.Time
 }
 
-// DeleteUnsentNotifications removes all not-yet-sent notifications for a rollout.
-// Called before re-scheduling on update so a shifted stage time doesn't leave
-// stale rows that would fire at the old (now-wrong) time.
-func (r *Repository) DeleteUnsentNotifications(ctx context.Context, rolloutID string) error {
-	_, err := r.pool.Exec(ctx, `DELETE FROM notifications WHERE rollout_id=$1 AND sent_at IS NULL`, rolloutID)
-	return err
+// RescheduleNotifications atomically replaces a rollout's unsent notifications:
+// in a single transaction it deletes the not-yet-sent rows and inserts the
+// recomputed set. Doing both in one tx means a concurrent dispatcher tick never
+// observes a half-applied reschedule (which could drop or duplicate a send).
+// Already-sent rows are left untouched.
+func (r *Repository) RescheduleNotifications(ctx context.Context, rolloutID string, items []ScheduledNotification) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM notifications WHERE rollout_id=$1 AND sent_at IS NULL`, rolloutID); err != nil {
+		return err
+	}
+	for _, it := range items {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO notifications (rollout_id, stage_seq, channel, fire_at)
+			VALUES ($1,$2,$3,$4)
+			ON CONFLICT DO NOTHING
+		`, rolloutID, it.StageSeq, it.Channel, it.FireAt); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
 }
 
 type PendingNotification struct {
@@ -587,18 +604,20 @@ func (r *Repository) PendingNotifications(ctx context.Context, now time.Time) ([
 
 func (r *Repository) MarkNotificationSent(ctx context.Context, id int64, errMsg string) error {
 	if errMsg == "" {
-		_, err := r.pool.Exec(ctx, `UPDATE notifications SET sent_at=now(), last_error=NULL WHERE id=$1`, id)
+		// Guard on sent_at IS NULL so a row that was deleted-then-reinserted (a
+		// reschedule racing this dispatch) can't be marked via a stale id.
+		_, err := r.pool.Exec(ctx, `UPDATE notifications SET sent_at=now(), last_error=NULL WHERE id=$1 AND sent_at IS NULL`, id)
 		return err
 	}
 	// Failure: record the error and bump the attempt count. Once the cap is
 	// reached, dead-letter the row (set sent_at) so it stops being retried on
-	// every dispatcher tick.
+	// every dispatcher tick. Only touch still-pending rows.
 	_, err := r.pool.Exec(ctx, `
 		UPDATE notifications
 		SET last_error = $2,
 		    attempts   = attempts + 1,
 		    sent_at    = CASE WHEN attempts + 1 >= $3 THEN now() ELSE sent_at END
-		WHERE id = $1
+		WHERE id = $1 AND sent_at IS NULL
 	`, id, errMsg, notifyMaxAttempts)
 	return err
 }

@@ -19,14 +19,15 @@ export const authInterceptor: HttpInterceptorFn = (req, next) => {
       // Skip the `/api/me` probe (expected to 401 for anonymous, handled by the
       // SessionStore) and `/auth/*`, and only act when a session actually
       // existed — so this never fires during normal anonymous bootstrap.
+      const path = req.url.split(/[?#]/)[0];
       if (
         err instanceof HttpErrorResponse &&
         err.status === 401 &&
         session.user() !== null &&
-        !req.url.includes('/api/me') &&
-        !req.url.includes('/auth/')
+        !path.endsWith('/api/me') &&
+        !path.includes('/auth/')
       ) {
-        session.user.set(null);
+        session.clear();
         live.disconnect();
       }
       return throwError(() => err);

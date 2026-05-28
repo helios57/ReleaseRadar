@@ -370,10 +370,17 @@
 
     @if (confirmingDelete()) {
       <div class="rr-modal-scrim" (click)="cancelDelete()">
-        <div class="rr-modal rr-modal-sm" (click)="$event.stopPropagation()" data-test="delete-confirm">
+        <div
+          class="rr-modal rr-modal-sm"
+          (click)="$event.stopPropagation()"
+          data-test="delete-confirm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="rr-delete-confirm-title"
+        >
           <header class="rr-modal-head">
             <div>
-              <h2>Delete rollout</h2>
+              <h2 id="rr-delete-confirm-title">Delete rollout</h2>
               <p class="rr-modal-sub">This permanently removes <strong>{{ r.title }}</strong> and its tasks.</p>
             </div>
           </header>
@@ -397,7 +404,13 @@
   </div>
 } @else if (deleted()) {
   <div style="padding: 16px 18px;" class="rr-muted" data-test="rollout-detail-deleted">
-    <p>This rollout was deleted.</p>
+    @if (editing()) {
+      <p data-test="deleted-while-editing">
+        This rollout was deleted while you were editing — your unsaved changes were discarded.
+      </p>
+    } @else {
+      <p>This rollout was deleted.</p>
+    }
     <button class="rr-btn rr-btn-ghost rr-btn-sm" (click)="back()">
       <rr-icon [d]="ICONS['chev']" [size]="13" /> Back to timeline
     </button>
